@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -45,6 +46,10 @@ func rule(width int) string {
 
 // Run executes the CLI benchmark flow.
 func Run(cfg Config) error {
+	if cfg.Balanced && cfg.Rounds > 1 && cfg.Rounds < len(cfg.Models) {
+		return fmt.Errorf("balanced mode requires at least %d rounds (%d models)", len(cfg.Models), len(cfg.Models))
+	}
+
 	schedule := bench.BuildSchedule(cfg.Models, cfg.Runs, bench.ScheduleConfig{
 		RoundRobin: cfg.RoundRobin,
 		Rounds:     cfg.Rounds,
@@ -168,7 +173,7 @@ func runBenchmarks(cfg Config, schedule [][]string) map[string][]*bench.RunResul
 	if cfg.Warmup {
 		for _, model := range cfg.Models {
 			progress(fmt.Sprintf("Warmup: %s", model))
-			_, err := bench.BenchmarkOnce(model, cfg.Prompt, cfg.BaseURL)
+			_, err := bench.BenchmarkOnce(context.Background(), model, cfg.Prompt, cfg.BaseURL)
 			if err != nil {
 				clearLine()
 				fmt.Printf("  %s\n", yellowStyle.Render(fmt.Sprintf("⚠ warmup failed for %s: %v", model, err)))
@@ -203,7 +208,7 @@ func runBenchmarks(cfg Config, schedule [][]string) map[string][]*bench.RunResul
 			}
 			progress(desc)
 
-			res, err := bench.BenchmarkOnce(model, cfg.Prompt, cfg.BaseURL)
+			res, err := bench.BenchmarkOnce(context.Background(), model, cfg.Prompt, cfg.BaseURL)
 			if err != nil {
 				clearLine()
 				fmt.Printf("  %s\n", redStyle.Render(fmt.Sprintf("✗ %s: %v", model, err)))
@@ -396,7 +401,7 @@ func showRelative(results map[string][]*bench.RunResult, models []string) {
 			}
 
 			var pct float64
-			if *metric.LowerIsBetter {
+			if metric.LowerIsBetter != nil && *metric.LowerIsBetter {
 				pct = ((avg - bestVal) / bestVal) * 100
 			} else {
 				pct = ((bestVal - avg) / bestVal) * 100

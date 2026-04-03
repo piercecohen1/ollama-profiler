@@ -170,6 +170,53 @@ func TestBuildSchedule_Balanced(t *testing.T) {
 	}
 }
 
+func TestBuildSchedule_BalancedFullLatinSquare(t *testing.T) {
+	// With rounds == len(models), each model should be first exactly once
+	models := []string{"A", "B", "C", "D"}
+	sched := BuildSchedule(models, 1, ScheduleConfig{Rounds: 4, Balanced: true})
+
+	if len(sched) != 4 {
+		t.Fatalf("expected 4 rounds, got %d", len(sched))
+	}
+
+	firstPositions := map[string]int{}
+	for _, round := range sched {
+		firstPositions[round[0]]++
+	}
+	for _, m := range models {
+		if firstPositions[m] != 1 {
+			t.Errorf("model %q was first %d times, want 1", m, firstPositions[m])
+		}
+	}
+}
+
+func TestBuildSchedule_BalancedRoundsGreaterThanModels(t *testing.T) {
+	models := []string{"A", "B", "C"}
+	sched := BuildSchedule(models, 1, ScheduleConfig{Rounds: 6, Balanced: true})
+
+	if len(sched) != 6 {
+		t.Fatalf("expected 6 rounds, got %d", len(sched))
+	}
+
+	// Each model should appear first exactly twice (6 rounds / 3 models)
+	firstPositions := map[string]int{}
+	for _, round := range sched {
+		firstPositions[round[0]]++
+	}
+	for _, m := range models {
+		if firstPositions[m] != 2 {
+			t.Errorf("model %q was first %d times, want 2", m, firstPositions[m])
+		}
+	}
+
+	// Consecutive rounds should not have the same first model
+	for i := 1; i < len(sched); i++ {
+		if sched[i][0] == sched[i-1][0] {
+			t.Errorf("rounds %d and %d have the same first model %q", i-1, i, sched[i][0])
+		}
+	}
+}
+
 func TestBuildSchedule_SequentialGrouping(t *testing.T) {
 	// In rounds mode, within a round, each model's runs should be grouped
 	models := []string{"A", "B"}

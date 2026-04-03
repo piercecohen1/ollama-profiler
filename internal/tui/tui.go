@@ -2,8 +2,10 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"image"
 	"image/color"
 	"image/draw"
@@ -156,14 +158,53 @@ func buildConfigPage(app *tview.Application, pages *tview.Pages) tview.Primitive
 
 	form := tview.NewForm().
 		AddInputField("Runs / round", "3", 6, tview.InputFieldInteger, nil).
-		AddDropDown("Schedule", modeOptions, 0, func(option string, index int) {
-			currentMode = index
-		}).
+		AddDropDown("Schedule", modeOptions, 0, nil).
 		AddInputField("Rounds", "3", 6, tview.InputFieldInteger, nil).
 		AddInputField("Cooldown (sec)", "0", 6, tview.InputFieldInteger, nil).
 		AddCheckbox("Warmup", false, nil).
 		AddInputField("Manual models", "", 40, nil, nil).
 		AddTextArea("Prompt", "Write a 200 word explanation of transformers in ML.", 60, 3, 0, nil)
+
+	// Get references to conditionally disabled fields
+	roundsField := form.GetFormItemByLabel("Rounds").(*tview.InputField)
+	cooldownField := form.GetFormItemByLabel("Cooldown (sec)").(*tview.InputField)
+
+	savedRounds := "3"
+	savedCooldown := "0"
+
+	updateRoundsEnabled := func(mode int) {
+		if mode >= 2 { // Rounds — Random or Rounds — Balanced
+			roundsField.SetDisabled(false)
+			roundsField.SetText(savedRounds)
+			roundsField.SetLabel("Rounds")
+			cooldownField.SetDisabled(false)
+			cooldownField.SetText(savedCooldown)
+			cooldownField.SetLabel("Cooldown (sec)")
+		} else {
+			// Save current values before clearing
+			if r := roundsField.GetText(); r != "" {
+				savedRounds = r
+			}
+			if c := cooldownField.GetText(); c != "" {
+				savedCooldown = c
+			}
+			roundsField.SetDisabled(true)
+			roundsField.SetText("n/a")
+			roundsField.SetLabel("Rounds")
+			cooldownField.SetDisabled(true)
+			cooldownField.SetText("n/a")
+			cooldownField.SetLabel("Cooldown (sec)")
+		}
+	}
+	updateRoundsEnabled(0) // initial state: disabled
+
+	// Wire up dropdown handler
+	if dd, ok := form.GetFormItemByLabel("Schedule").(*tview.DropDown); ok {
+		dd.SetSelectedFunc(func(text string, index int) {
+			currentMode = index
+			updateRoundsEnabled(index)
+		})
+	}
 
 	form.SetBorder(true).
 		SetTitle(" Settings ").
@@ -236,6 +277,11 @@ func buildConfigPage(app *tview.Application, pages *tview.Pages) tview.Primitive
 			nRounds = 1
 		}
 
+		if currentMode == 3 && nRounds < len(selectedModels) {
+			errorText.SetText(fmt.Sprintf("[red]Balanced mode requires at least %d rounds (%d models)", len(selectedModels), len(selectedModels)))
+			return
+		}
+
 		cooldownStr := form.GetFormItemByLabel("Cooldown (sec)").(*tview.InputField).GetText()
 		cooldown, _ := strconv.Atoi(cooldownStr)
 
@@ -259,8 +305,9 @@ func buildConfigPage(app *tview.Application, pages *tview.Pages) tview.Primitive
 			Balanced:   currentMode == 3,
 			Cooldown:   cooldown,
 		}
-		if currentMode >= 2 && nRounds <= 1 {
-			cfg.Rounds = 3
+		if currentMode >= 2 && nRounds < 2 {
+			errorText.SetText("[red]Rounds mode requires at least 2 rounds")
+			return
 		}
 
 		// Switch to benchmark screen
@@ -291,6 +338,8 @@ func buildConfigPage(app *tview.Application, pages *tview.Pages) tview.Primitive
 
 func buildBenchPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig) tview.Primitive {
 	results := make(map[string][]*bench.RunResult)
+	ctx, cancel := context.WithCancel(context.Background())
+	resultsShown := false
 
 	schedule := bench.BuildSchedule(cfg.Models, cfg.Runs, bench.ScheduleConfig{
 		RoundRobin: cfg.RoundRobin,
@@ -373,7 +422,11 @@ func buildBenchPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig
 	}
 
 	showResults := func() {
-		resultsPage := buildResultsPage(app, pages, cfg, results)
+		if resultsShown {
+			return
+		}
+		resultsShown = true
+		resultsPage := buildResultsPage(app, pages, cfg, results, cancel)
 		pages.AddPage("results", resultsPage, true, true)
 		pages.SwitchToPage("results")
 	}
@@ -385,21 +438,31 @@ func buildBenchPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig
 		// Warmup
 		if cfg.Warmup {
 			for _, model := range cfg.Models {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				modelCopy := model
 				app.QueueUpdateDraw(func() {
-					statusView.SetText(fmt.Sprintf("[purple]  Warmup: %s", model))
+					statusView.SetText(fmt.Sprintf("[purple]  Warmup: %s", modelCopy))
 				})
 				var err error
 				if dryRunMode {
 					time.Sleep(50 * time.Millisecond)
 				} else {
-					_, err = bench.BenchmarkOnce(model, cfg.Prompt, cfg.BaseURL)
+					_, err = bench.BenchmarkOnce(ctx, model, cfg.Prompt, cfg.BaseURL)
 				}
-				done++
+				if ctx.Err() != nil {
+					return
+				}
+				errCopy := err
 				app.QueueUpdateDraw(func() {
-					if err != nil {
-						addLogLine(fmt.Sprintf("[yellow]  ⚠ Warmup %s failed: %v", model, err))
+					done++
+					if errCopy != nil {
+						addLogLine(fmt.Sprintf("[yellow]  ⚠ Warmup %s failed: %v", modelCopy, errCopy))
 					} else {
-						addLogLine(fmt.Sprintf("[white]  Warmup %s done", model))
+						addLogLine(fmt.Sprintf("[white]  Warmup %s done", modelCopy))
 					}
 					updateProgress()
 				})
@@ -411,6 +474,11 @@ func buildBenchPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig
 			// Cooldown
 			if ri > 0 && cfg.Cooldown > 0 {
 				for s := cfg.Cooldown; s > 0; s-- {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
 					remaining := s
 					app.QueueUpdateDraw(func() {
 						statusView.SetText(fmt.Sprintf("[yellow]  Cooldown %ds...", remaining))
@@ -429,6 +497,12 @@ func buildBenchPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig
 			}
 
 			for _, model := range sched {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
 				counts[model]++
 				run := counts[model]
 				rnd := ri + 1
@@ -447,22 +521,27 @@ func buildBenchPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig
 				if dryRunMode {
 					res = fakeBenchmarkOnce(model)
 				} else {
-					res, err = bench.BenchmarkOnce(model, cfg.Prompt, cfg.BaseURL)
+					res, err = bench.BenchmarkOnce(ctx, model, cfg.Prompt, cfg.BaseURL)
+				}
+				if ctx.Err() != nil {
+					return
 				}
 				modelCopy, rndCopy, runCopy := model, rnd, run
-				done++
 
 				if err != nil {
-					results[modelCopy] = append(results[modelCopy], &bench.RunResult{Error: err})
+					errResult := &bench.RunResult{Error: err}
 					app.QueueUpdateDraw(func() {
+						done++
+						results[modelCopy] = append(results[modelCopy], errResult)
 						addLogLine(fmt.Sprintf("[red]  ✗ %s: %v", modelCopy, err))
 						updateProgress()
 					})
 				} else {
 					res.Round = rndCopy
-					results[modelCopy] = append(results[modelCopy], res)
 					resCopy := res
 					app.QueueUpdateDraw(func() {
+						done++
+						results[modelCopy] = append(results[modelCopy], resCopy)
 						addResultRow(modelCopy, rndCopy, runCopy, resCopy)
 						addLogLine(fmt.Sprintf("[green]  ✓ %s R%d/run%d — %.1f tok/s",
 							modelCopy, rndCopy, runCopy, resCopy.EvalRate))
@@ -500,7 +579,7 @@ func buildBenchPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig
 
 // ── Results Page ────────────────────────────────────────────────────────────
 
-func buildResultsPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig, results map[string][]*bench.RunResult) tview.Primitive {
+func buildResultsPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig, results map[string][]*bench.RunResult, cancel context.CancelFunc) tview.Primitive {
 	tabPages := tview.NewPages()
 
 	// Build all tab content
@@ -561,11 +640,16 @@ func buildResultsPage(app *tview.Application, pages *tview.Pages, cfg *benchConf
 				app.Stop()
 				return nil
 			case 'r':
+				cancel()
 				pages.SwitchToPage("config")
 				return nil
 			case 'e':
-				dir := exportResults(cfg, results)
-				footer.SetText("[green]  ✓ Exported to " + dir + "/[-]")
+				dir, err := exportResults(cfg, results)
+				if err != nil {
+					footer.SetText("[red]  ✗ Export failed: " + err.Error())
+				} else {
+					footer.SetText("[green]  ✓ Exported to " + dir + "/[-]")
+				}
 				go func() {
 					time.Sleep(4 * time.Second)
 					app.QueueUpdateDraw(func() {
@@ -748,7 +832,7 @@ func buildRelativeTable(cfg *benchConfig, results map[string][]*bench.RunResult)
 			}
 
 			var pct float64
-			if *metric.LowerIsBetter {
+			if metric.LowerIsBetter != nil && *metric.LowerIsBetter {
 				pct = ((avg - bestVal) / bestVal) * 100
 			} else {
 				pct = ((bestVal - avg) / bestVal) * 100
@@ -966,20 +1050,29 @@ func findBestModel(avgs map[string]float64, lowerIsBetter *bool) string {
 
 // ── Export ───────────────────────────────────────────────────────────────────
 
-func exportResults(cfg *benchConfig, results map[string][]*bench.RunResult) string {
+func exportResults(cfg *benchConfig, results map[string][]*bench.RunResult) (string, error) {
 	ts := time.Now().Format("2006-01-02-1504")
-	cwd, _ := os.Getwd()
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("getting working directory: %w", err)
+	}
 	dir := fmt.Sprintf("%s/ollama-bench-%s", cwd, ts)
-	os.MkdirAll(dir, 0755)
-
-	exportResultsJSON(cfg, results, dir)
-	exportResultsHTML(cfg, results, dir, ts)
-	exportResultsPNG(cfg, results, dir, ts)
-
-	return dir
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("creating export directory: %w", err)
+	}
+	if err := exportResultsJSON(cfg, results, dir); err != nil {
+		return "", fmt.Errorf("exporting JSON: %w", err)
+	}
+	if err := exportResultsHTML(cfg, results, dir, ts); err != nil {
+		return "", fmt.Errorf("exporting HTML: %w", err)
+	}
+	if err := exportResultsPNG(cfg, results, dir, ts); err != nil {
+		return "", fmt.Errorf("exporting PNG: %w", err)
+	}
+	return dir, nil
 }
 
-func exportResultsJSON(cfg *benchConfig, results map[string][]*bench.RunResult, dir string) {
+func exportResultsJSON(cfg *benchConfig, results map[string][]*bench.RunResult, dir string) error {
 	export := make(map[string][]map[string]interface{})
 	for _, model := range cfg.Models {
 		var entries []map[string]interface{}
@@ -1001,11 +1094,14 @@ func exportResultsJSON(cfg *benchConfig, results map[string][]*bench.RunResult, 
 		}
 		export[model] = entries
 	}
-	data, _ := json.MarshalIndent(export, "", "  ")
-	os.WriteFile(dir+"/results.json", data, 0644)
+	data, err := json.MarshalIndent(export, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dir+"/results.json", data, 0644)
 }
 
-func exportResultsHTML(cfg *benchConfig, results map[string][]*bench.RunResult, dir, ts string) {
+func exportResultsHTML(cfg *benchConfig, results map[string][]*bench.RunResult, dir, ts string) error {
 	path := dir + "/report.html"
 
 	models := cfg.Models
@@ -1014,6 +1110,7 @@ func exportResultsHTML(cfg *benchConfig, results map[string][]*bench.RunResult, 
 	// Compute averages for chart metrics
 	type chartData struct {
 		Label     string
+		Unit      string
 		Direction string
 		Values    map[string]float64
 		Best      string
@@ -1045,6 +1142,7 @@ func exportResultsHTML(cfg *benchConfig, results map[string][]*bench.RunResult, 
 		}
 		charts = append(charts, chartData{
 			Label:     metric.Label,
+			Unit:      metric.Unit,
 			Direction: dir,
 			Values:    avgs,
 			Best:      findBestModel(avgs, metric.LowerIsBetter),
@@ -1083,7 +1181,7 @@ func exportResultsHTML(cfg *benchConfig, results map[string][]*bench.RunResult, 
 			if model == best {
 				cls = " class='best'"
 			}
-			summaryRows.WriteString(fmt.Sprintf("<td%s>%s</td>", cls, cells[model]))
+			summaryRows.WriteString(fmt.Sprintf("<td%s>%s</td>", cls, html.EscapeString(cells[model])))
 		}
 		summaryRows.WriteString("</tr>\n")
 	}
@@ -1091,7 +1189,7 @@ func exportResultsHTML(cfg *benchConfig, results map[string][]*bench.RunResult, 
 	// Model header cells
 	var modelHeaders strings.Builder
 	for _, model := range models {
-		modelHeaders.WriteString(fmt.Sprintf("<th>%s</th>", model))
+		modelHeaders.WriteString(fmt.Sprintf("<th>%s</th>", html.EscapeString(model)))
 	}
 
 	// Build chart HTML sections
@@ -1123,7 +1221,7 @@ func exportResultsHTML(cfg *benchConfig, results map[string][]*bench.RunResult, 
 				"<div class='bar-row'><span class='bar-label'%s>%s</span>"+
 					"<div class='bar-track'><div class='bar-fill' style='width:%.1f%%;background:%s'></div></div>"+
 					"<span class='bar-value'>%s</span></div>\n",
-				labelStyle, model, pct, color, bench.FmtVal(val, "")))
+				labelStyle, html.EscapeString(model), pct, color, bench.FmtVal(val, ch.Unit)))
 		}
 		chartSections.WriteString("</div>\n")
 	}
@@ -1183,7 +1281,7 @@ func exportResultsHTML(cfg *benchConfig, results map[string][]*bench.RunResult, 
 		chartSections.String(),
 	)
 
-	os.WriteFile(path, []byte(html), 0644)
+	return os.WriteFile(path, []byte(html), 0644)
 }
 
 // ── PNG Export ───────────────────────────────────────────────────────────────
@@ -1206,13 +1304,13 @@ var (
 	}
 )
 
-func exportResultsPNG(cfg *benchConfig, results map[string][]*bench.RunResult, dir, ts string) {
+func exportResultsPNG(cfg *benchConfig, results map[string][]*bench.RunResult, dir, ts string) error {
 	models := cfg.Models
 
 	// Load Go Mono font (embedded, works on all platforms)
 	tt, err := opentype.Parse(gomono.TTF)
 	if err != nil {
-		return
+		return fmt.Errorf("parsing font: %w", err)
 	}
 	face, _ := opentype.NewFace(tt, &opentype.FaceOptions{Size: 13, DPI: 144})
 
@@ -1229,9 +1327,9 @@ func exportResultsPNG(cfg *benchConfig, results map[string][]*bench.RunResult, d
 
 	// Compute chart data
 	type chartEntry struct {
-		label, direction string
-		avgs             map[string]float64
-		best             string
+		label, unit, direction string
+		avgs                   map[string]float64
+		best                   string
 	}
 	var charts []chartEntry
 	for _, metric := range bench.ChartMetrics {
@@ -1259,6 +1357,7 @@ func exportResultsPNG(cfg *benchConfig, results map[string][]*bench.RunResult, d
 		}
 		charts = append(charts, chartEntry{
 			label:     metric.Label,
+			unit:      metric.Unit,
 			direction: metricDir,
 			avgs:      avgs,
 			best:      findBestModel(avgs, metric.LowerIsBetter),
@@ -1303,7 +1402,7 @@ func exportResultsPNG(cfg *benchConfig, results map[string][]*bench.RunResult, d
 	// Title
 	drawText(padX, 20*S, "Ollama Bench Results", pngPrimary)
 	drawText(padX, 38*S, fmt.Sprintf("Generated %s  |  %d model(s)  |  %d run(s)/model",
-		time.Now().Format("2006-01-02 15:04"), len(models), cfg.Runs), pngDim)
+		time.Now().Format("2006-01-02 15:04"), len(models), cfg.Runs*max(cfg.Rounds, 1)), pngDim)
 
 	// Charts
 	y := titleHeight
@@ -1344,7 +1443,7 @@ func exportResultsPNG(cfg *benchConfig, results map[string][]*bench.RunResult, d
 			barColor := pngBarColors[mi%len(pngBarColors)]
 			fillRect(barAreaX, y+2*S, barW, barHeight, barColor)
 
-			valStr := bench.FmtVal(val, "")
+			valStr := bench.FmtVal(val, ch.unit)
 			drawText(barAreaX+barMaxWidth+8*S, y+13*S, valStr, pngFg)
 
 			y += barHeight + barGap
@@ -1354,8 +1453,8 @@ func exportResultsPNG(cfg *benchConfig, results map[string][]*bench.RunResult, d
 
 	f, err := os.Create(dir + "/charts.png")
 	if err != nil {
-		return
+		return err
 	}
 	defer f.Close()
-	png.Encode(f, img)
+	return png.Encode(f, img)
 }

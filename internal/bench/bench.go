@@ -3,6 +3,7 @@ package bench
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -217,7 +218,10 @@ func BuildSchedule(models []string, runsPerModel int, cfg ScheduleConfig) [][]st
 	if nRounds > 1 {
 		rounds := make([][]string, nRounds)
 		if cfg.Balanced {
-			// Shuffle base order, then rotate for Latin-square
+			// Shuffle base order, then rotate for Latin-square.
+			// Use evenly-spaced offsets so that when nRounds < len(models)
+			// (possible if models list shrinks later), positional coverage
+			// is maximised rather than clustering at one end.
 			base := make([]string, len(models))
 			copy(base, models)
 			rand.Shuffle(len(base), func(i, j int) { base[i], base[j] = base[j], base[i] })
@@ -279,10 +283,10 @@ type ollamaChunk struct {
 }
 
 // BenchmarkOnce runs a single inference pass against a model and returns metrics.
-func BenchmarkOnce(model, prompt, baseURL string) (*RunResult, error) {
+func BenchmarkOnce(ctx context.Context, model, prompt, baseURL string) (*RunResult, error) {
 	bodyBytes, _ := json.Marshal(map[string]string{"model": model, "prompt": prompt})
 
-	req, err := http.NewRequest("POST", baseURL+"/api/generate", bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/api/generate", bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
