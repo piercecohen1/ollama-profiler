@@ -219,9 +219,8 @@ func BuildSchedule(models []string, runsPerModel int, cfg ScheduleConfig) [][]st
 		rounds := make([][]string, nRounds)
 		if cfg.Balanced {
 			// Shuffle base order, then rotate for Latin-square.
-			// Use evenly-spaced offsets so that when nRounds < len(models)
-			// (possible if models list shrinks later), positional coverage
-			// is maximised rather than clustering at one end.
+			// Simple modular rotation (r % len) gives clean cycling
+			// even when nRounds > len(models).
 			base := make([]string, len(models))
 			copy(base, models)
 			rand.Shuffle(len(base), func(i, j int) { base[i], base[j] = base[j], base[i] })

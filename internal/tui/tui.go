@@ -1226,7 +1226,7 @@ func exportResultsHTML(cfg *benchConfig, results map[string][]*bench.RunResult, 
 		chartSections.WriteString("</div>\n")
 	}
 
-	html := fmt.Sprintf(`<!DOCTYPE html>
+	htmlContent := fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -1281,7 +1281,7 @@ func exportResultsHTML(cfg *benchConfig, results map[string][]*bench.RunResult, 
 		chartSections.String(),
 	)
 
-	return os.WriteFile(path, []byte(html), 0644)
+	return os.WriteFile(path, []byte(htmlContent), 0644)
 }
 
 // ── PNG Export ───────────────────────────────────────────────────────────────
