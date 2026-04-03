@@ -351,7 +351,15 @@ func buildBenchPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig
 		total += len(s)
 	}
 	if cfg.Warmup {
-		total += len(cfg.Models)
+		for _, s := range schedule {
+			seen := make(map[string]bool)
+			for _, m := range s {
+				if !seen[m] {
+					seen[m] = true
+					total++
+				}
+			}
+		}
 	}
 	done := 0
 
@@ -435,40 +443,6 @@ func buildBenchPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig
 	go func() {
 		nRounds := len(schedule)
 
-		// Warmup
-		if cfg.Warmup {
-			for _, model := range cfg.Models {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-				modelCopy := model
-				app.QueueUpdateDraw(func() {
-					statusView.SetText(fmt.Sprintf("[purple]  Warmup: %s", modelCopy))
-				})
-				var err error
-				if dryRunMode {
-					time.Sleep(50 * time.Millisecond)
-				} else {
-					_, err = bench.BenchmarkOnce(ctx, model, cfg.Prompt, cfg.BaseURL)
-				}
-				if ctx.Err() != nil {
-					return
-				}
-				errCopy := err
-				app.QueueUpdateDraw(func() {
-					done++
-					if errCopy != nil {
-						addLogLine(fmt.Sprintf("[yellow]  ⚠ Warmup %s failed: %v", modelCopy, errCopy))
-					} else {
-						addLogLine(fmt.Sprintf("[white]  Warmup %s done", modelCopy))
-					}
-					updateProgress()
-				})
-			}
-		}
-
 		// Benchmark rounds
 		for ri, sched := range schedule {
 			// Cooldown
@@ -496,11 +470,40 @@ func buildBenchPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig
 				perModel[mm]++
 			}
 
+			warmedUp := make(map[string]bool)
 			for _, model := range sched {
 				select {
 				case <-ctx.Done():
 					return
 				default:
+				}
+
+				// Warmup: one uncounted run before first counted run per model per round
+				if cfg.Warmup && !warmedUp[model] {
+					warmedUp[model] = true
+					modelCopy := model
+					app.QueueUpdateDraw(func() {
+						statusView.SetText(fmt.Sprintf("[purple]  Warmup: %s", modelCopy))
+					})
+					var warmupErr error
+					if dryRunMode {
+						time.Sleep(50 * time.Millisecond)
+					} else {
+						_, warmupErr = bench.BenchmarkOnce(ctx, model, cfg.Prompt, cfg.BaseURL)
+					}
+					if ctx.Err() != nil {
+						return
+					}
+					errCopy := warmupErr
+					app.QueueUpdateDraw(func() {
+						done++
+						if errCopy != nil {
+							addLogLine(fmt.Sprintf("[yellow]  ⚠ Warmup %s failed: %v", modelCopy, errCopy))
+						} else {
+							addLogLine(fmt.Sprintf("[white]  Warmup %s done", modelCopy))
+						}
+						updateProgress()
+					})
 				}
 
 				counts[model]++

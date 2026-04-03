@@ -149,7 +149,15 @@ func runBenchmarks(cfg Config, schedule [][]string) map[string][]*bench.RunResul
 		total += len(s)
 	}
 	if cfg.Warmup {
-		total += len(cfg.Models)
+		for _, s := range schedule {
+			seen := make(map[string]bool)
+			for _, m := range s {
+				if !seen[m] {
+					seen[m] = true
+					total++
+				}
+			}
+		}
 	}
 	done := 0
 
@@ -169,19 +177,6 @@ func runBenchmarks(cfg Config, schedule [][]string) map[string][]*bench.RunResul
 		fmt.Printf("  %s %s %3d%%  %s", headerStyle.Render(bar), dimStyle.Render(fmt.Sprintf("%d/%d", done, total)), pct, desc)
 	}
 
-	// Warmup
-	if cfg.Warmup {
-		for _, model := range cfg.Models {
-			progress(fmt.Sprintf("Warmup: %s", model))
-			_, err := bench.BenchmarkOnce(context.Background(), model, cfg.Prompt, cfg.BaseURL)
-			if err != nil {
-				clearLine()
-				fmt.Printf("  %s\n", yellowStyle.Render(fmt.Sprintf("⚠ warmup failed for %s: %v", model, err)))
-			}
-			done++
-		}
-	}
-
 	// Benchmark
 	for ri, sched := range schedule {
 		if ri > 0 && cfg.Cooldown > 0 {
@@ -197,7 +192,20 @@ func runBenchmarks(cfg Config, schedule [][]string) map[string][]*bench.RunResul
 			perModel[m]++
 		}
 
+		warmedUp := make(map[string]bool)
 		for _, model := range sched {
+			// Warmup: one uncounted run before first counted run per model per round
+			if cfg.Warmup && !warmedUp[model] {
+				warmedUp[model] = true
+				progress(fmt.Sprintf("Warmup: %s", model))
+				_, err := bench.BenchmarkOnce(context.Background(), model, cfg.Prompt, cfg.BaseURL)
+				if err != nil {
+					clearLine()
+					fmt.Printf("  %s\n", yellowStyle.Render(fmt.Sprintf("⚠ warmup failed for %s: %v", model, err)))
+				}
+				done++
+			}
+
 			counts[model]++
 			run := counts[model]
 			rnd := ri + 1

@@ -79,7 +79,7 @@ Cross-compilation targets: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64,
 | `--balanced` | Latin-square positional balancing with `--rounds` |
 | `--round-robin` | Interleave models each run |
 | `--cooldown SEC` | Sleep between rounds (thermal recovery) |
-| `--warmup` | One uncounted warmup run per model |
+| `--warmup` | One uncounted warmup run before each model's first counted run per round |
 | `--json FILE` | Export raw results (CLI mode only) |
 | `--no-per-run` | Skip per-run detail tables (CLI mode only) |
 | `-p, --prompt` | Prompt text (default: transformers explanation) |
