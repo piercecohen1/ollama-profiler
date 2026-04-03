@@ -32,13 +32,13 @@ internal/
   - **Sequential** (default): All N runs of model A, then B, then C. Model stays loaded in VRAM.
   - **Round-robin** (`--round-robin`): Interleave A,B,C,A,B,C...
   - **Rounds** (`--rounds R`): R rounds with randomized model order per round (controls for thermal throttling).
-  - **Balanced** (`--rounds R --balanced`): Latin-square rotation for positional fairness. Requires `rounds >= len(models)`; validated in both TUI and CLI. Uses evenly-spaced offsets for maximal positional coverage.
+  - **Balanced** (`--rounds R --balanced`): Latin-square rotation for positional fairness. Requires `rounds >= len(models)`; validated in both TUI and CLI. Uses simple modular rotation (`r % len(models)`) for clean positional cycling.
 - **Stats**: `Stats()` computes mean/stddev/min/max, filtering NaN values.
 
 ### TUI screens
 
 1. **Config**: tview List (model multi-select with click/space/enter toggle) + Form (runs, schedule dropdown, rounds, cooldown, warmup, manual models, prompt). Models auto-detected from Ollama `/api/tags`.
-2. **Benchmark**: Progress bar, live results Table, scrolling log TextView. Benchmarks run in a goroutine, UI updates via `app.QueueUpdateDraw()`.
+2. **Benchmark**: Progress bar, live results Table, scrolling log TextView. Benchmarks run in a goroutine with `context.Context` for cancellation; all shared state (`results` map, `done` counter) is mutated inside `QueueUpdateDraw()` callbacks to avoid data races. A `resultsShown` guard prevents duplicate results page creation.
 3. **Results**: 4 tabs (Summary, Per-Run, Relative, Charts) switchable via tab/arrows. Summary and Relative color-code winners (green) and losers (yellow <10%, red >10%). Charts use Unicode block characters for horizontal bar charts.
 
 ### Export (`e` key in results)
@@ -99,6 +99,14 @@ go test ./...                                    # unit tests
 ./ollama-bench --tui --dry-run                   # manual TUI testing without Ollama
 ./ollama-bench gemma4:e4b llama3.2:3b -n 2       # live CLI test
 ```
+
+## Concurrency model
+
+The TUI benchmark goroutine follows these rules:
+- `BenchmarkOnce()` accepts `context.Context` — cancelled when the user navigates away ('r' on results page)
+- All writes to shared state (`results` map, `done` counter) happen inside `QueueUpdateDraw()`, serializing with UI reads on the main thread
+- `resultsShown` flag prevents the completion handler from clobbering an already-displayed results page
+- Export functions return errors; the UI shows red error text on failure instead of a false success message
 
 ## Install script
 
