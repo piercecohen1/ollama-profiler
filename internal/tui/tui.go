@@ -553,6 +553,7 @@ func buildBenchPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig
 
 		app.QueueUpdateDraw(func() {
 			statusView.SetText("[green]  Complete!")
+			resultsShown = false // allow rebuild with final data
 			showResults()
 		})
 	}()
