@@ -4,7 +4,7 @@ CLI + TUI tool for benchmarking and comparing Ollama model performance side-by-s
 
 ## Architecture
 
-Single Go binary (`cmd/ollama-bench/main.go`) with two modes:
+Single Go binary (`main.go` at the repo root) with two modes:
 
 - **CLI mode** (default): Non-interactive, rich terminal output via lipgloss. Entry point: `internal/cli/cli.go`
 - **TUI mode** (`--tui`): Interactive full-screen UI via tview with mouse support. Entry point: `internal/tui/tui.go`
@@ -12,7 +12,7 @@ Single Go binary (`cmd/ollama-bench/main.go`) with two modes:
 ### Package layout
 
 ```
-cmd/ollama-bench/main.go    # Entry point, cobra CLI flag parsing
+main.go                     # Entry point, cobra CLI flag parsing
 internal/
   bench/                    # Core engine (no UI dependencies)
     bench.go                # Metrics, RunResult, scheduling, Ollama API, model listing
@@ -33,18 +33,20 @@ internal/
   - **Round-robin** (`--round-robin`): Interleave A,B,C,A,B,C...
   - **Rounds** (`--rounds R`): R rounds with randomized model order per round (controls for thermal throttling).
   - **Balanced** (`--rounds R --balanced`): Latin-square rotation for positional fairness. Requires `rounds >= len(models)`; validated in both TUI and CLI. Uses simple modular rotation (`r % len(models)`) for clean positional cycling.
-- **Stats**: `Stats()` computes mean/stddev/min/max, filtering NaN values.
+- **Stats**: `Stats()` computes mean/stddev/min/max, filtering NaN values. Zero-duration rates from Ollama (e.g. cached prompts) are stored as NaN to avoid poisoning averages.
+- **BenchmarkOpts**: Controls Ollama request parameters (`num_predict`, `seed`, `think`) passed to `/api/generate` for reproducible benchmarking. Defaults: 256 max tokens, seed 42, thinking disabled.
+- **ResolveBaseURL**: Resolves the Ollama server URL in priority order: explicit `--url` flag → `OLLAMA_HOST` env var → `http://localhost:11434`. Normalizes scheme (adds `http://` if missing), handles bare port (`:11434`), and trims trailing slashes. Both CLI and TUI use this. The TUI receives the resolved URL via `tui.Run(dryRun, baseURL)`.
 
 ### TUI screens
 
-1. **Config**: tview List (model multi-select with click/space/enter toggle) + Form (runs, schedule dropdown, rounds, cooldown, warmup, manual models, prompt). Models auto-detected from Ollama `/api/tags`.
+1. **Config**: tview List (model multi-select with click/space/enter toggle) + Form (runs, schedule dropdown, rounds, cooldown, warmup, max tokens, seed, think, manual models, prompt). Models auto-detected from Ollama `/api/tags`.
 2. **Benchmark**: Progress bar, live results Table, scrolling log TextView. Benchmarks run in a goroutine with `context.Context` for cancellation; all shared state (`results` map, `done` counter) is mutated inside `QueueUpdateDraw()` callbacks to avoid data races. A `resultsShown` guard prevents duplicate results page creation.
 3. **Results**: 4 tabs (Summary, Per-Run, Relative, Charts) switchable via tab/arrows. Summary and Relative color-code winners (green) and losers (yellow <10%, red >10%). Charts use Unicode block characters for horizontal bar charts.
 
 ### Export (`e` key in results)
 
 Creates a timestamped directory `ollama-bench-YYYY-MM-DD-HHMM/` containing:
-- `results.json` — raw metrics data
+- `results.json` — raw metrics data wrapped in `{"meta": {...}, "results": {...}}` with full benchmark config for reproducibility
 - `report.html` — self-contained dark-themed HTML with summary table + bar charts
 - `charts.png` — generated natively via Go `image/png` + `golang.org/x/image/font/gofont/gomono` (no browser needed). 2x resolution for retina quality.
 
@@ -53,7 +55,7 @@ In charts (HTML/PNG), winner is indicated by green model name text. In TUI chart
 ## Building
 
 ```bash
-go build -o ollama-bench ./cmd/ollama-bench/   # local build
+go build -o ollama-bench .                     # local build
 make build                                      # same, with ldflags
 make test                                       # run tests
 make dist                                       # cross-compile all platforms → dist/
@@ -80,7 +82,10 @@ Cross-compilation targets: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64,
 | `--round-robin` | Interleave models each run |
 | `--cooldown SEC` | Sleep between rounds (thermal recovery) |
 | `--warmup` | One uncounted warmup run before each model's first counted run per round |
-| `--json FILE` | Export raw results (CLI mode only) |
+| `--num-predict N` | Max tokens to generate per run (default 256, 0 = unlimited). Controls output length for fair comparison |
+| `--seed N` | Random seed for deterministic output (default 42, 0 = random) |
+| `--think` | Allow model thinking tokens (disabled by default; affects TTFT measurement). Accepts `true`, `low`, `medium`, `high` |
+| `--json FILE` | Export raw results with metadata (CLI mode only) |
 | `--no-per-run` | Skip per-run detail tables (CLI mode only) |
 | `-p, --prompt` | Prompt text (default: transformers explanation) |
 | `--prompt-file` | Read prompt from file |

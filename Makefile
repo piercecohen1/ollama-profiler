@@ -13,7 +13,7 @@ PLATFORMS := \
 .PHONY: build test clean dist all
 
 build:
-	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/ollama-bench/
+	go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
 
 test:
 	go test ./... -v
@@ -31,7 +31,7 @@ dist: clean
 		if [ "$$os" = "windows" ]; then ext=".exe"; fi; \
 		output="dist/$(BINARY)-$${os}-$${arch}$${ext}"; \
 		echo "Building $$output..."; \
-		GOOS=$$os GOARCH=$$arch go build -ldflags "$(LDFLAGS)" -o $$output ./cmd/ollama-bench/; \
+		GOOS=$$os GOARCH=$$arch go build -ldflags "$(LDFLAGS)" -o $$output .; \
 	done
 	@echo "Done. Binaries in dist/"
 	@ls -lh dist/

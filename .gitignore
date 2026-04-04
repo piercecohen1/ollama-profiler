@@ -2,7 +2,7 @@ __pycache__/
 *.pyc
 
 # Go build artifacts
-ollama-bench
+/ollama-bench
 dist/
 
 # Export output directories

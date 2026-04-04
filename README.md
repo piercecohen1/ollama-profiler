@@ -24,7 +24,7 @@ curl -fsSL https://raw.githubusercontent.com/piercecohen1/ollama-bench/main/inst
 Or build from source:
 
 ```sh
-go install github.com/piercecohen1/ollama-bench/cmd/ollama-bench@latest
+go install github.com/piercecohen1/ollama-bench@latest
 ```
 
 ## Quick Start
@@ -58,10 +58,13 @@ ollama-bench [models...] [flags]
 | `--cooldown SEC` | Sleep between rounds | `0` |
 | `-p, --prompt` | Prompt text | `"Write a 200 word explanation..."` |
 | `--prompt-file` | Read prompt from file | — |
-| `--json FILE` | Export results to JSON | — |
+| `--num-predict N` | Max tokens to generate per run (0 = unlimited) | `256` |
+| `--seed N` | Random seed for deterministic output (0 = random) | `42` |
+| `--think` | Allow model thinking tokens | — |
+| `--json FILE` | Export results to JSON (includes metadata) | — |
 | `--no-per-run` | Skip per-run detail tables | — |
 | `--dry-run` | Fake data, no Ollama needed | — |
-| `--url` | Ollama API base URL | `http://localhost:11434` |
+| `--url` | Ollama API base URL | `$OLLAMA_HOST` or `http://localhost:11434` |
 
 ## Scheduling Modes
 
