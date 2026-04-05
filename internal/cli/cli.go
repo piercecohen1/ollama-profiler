@@ -1,4 +1,4 @@
-// Package cli implements the non-interactive CLI output for ollama-bench.
+// Package cli implements the non-interactive CLI output for ollama-profiler.
 package cli
 
 import (
@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/piercecohen1/ollama-bench/internal/bench"
+	"github.com/piercecohen1/ollama-profiler/internal/bench"
 )
 
 // Config holds the CLI benchmark configuration.

@@ -1,5 +1,5 @@
-BINARY  := ollama-bench
-MODULE  := github.com/piercecohen1/ollama-bench
+BINARY  := ollama-profiler
+MODULE  := github.com/piercecohen1/ollama-profiler
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -s -w -X main.version=$(VERSION)
 

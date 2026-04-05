@@ -41,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          binary=ollama-bench
+          binary=ollama-profiler
           ext=""
           if [ "$GOOS" = "windows" ]; then
             ext=".exe"
@@ -65,12 +65,12 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          dist_bin="dist/ollama-bench-linux-amd64/ollama-bench"
+          dist_bin="dist/ollama-profiler-linux-amd64/ollama-profiler"
           "$dist_bin" --version | grep -F "$version"
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ollama-bench-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: ollama-profiler-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
             dist/*.tar.gz
             dist/*.zip
@@ -105,12 +105,12 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           uvx go-to-wheel . \
-            --name ollama-bench \
+            --name ollama-profiler \
             --readme README.md \
             --description "CLI + TUI tool for benchmarking Ollama models side-by-side" \
             --author 'Pierce Cohen' \
             --license MIT \
-            --url https://github.com/piercecohen1/ollama-bench \
+            --url https://github.com/piercecohen1/ollama-profiler \
             --set-version-var main.version \
             --version "$version"
       - name: Store the distribution packages

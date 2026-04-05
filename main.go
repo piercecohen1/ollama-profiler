@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/piercecohen1/ollama-bench/internal/bench"
-	"github.com/piercecohen1/ollama-bench/internal/cli"
-	"github.com/piercecohen1/ollama-bench/internal/tui"
+	"github.com/piercecohen1/ollama-profiler/internal/bench"
+	"github.com/piercecohen1/ollama-profiler/internal/cli"
+	"github.com/piercecohen1/ollama-profiler/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -33,20 +33,20 @@ var (
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:     "ollama-bench [models...]",
+		Use:     "ollama-profiler [models...]",
 		Version: version,
 		Short:   "Benchmark and compare Ollama models side-by-side",
-		Long: `ollama-bench — Compare Ollama model performance side-by-side.
+		Long: `ollama-profiler — Compare Ollama model performance side-by-side.
 
 Scheduling modes:
   (default)       Sequential — all runs of model A, then B, then C.
   --round-robin   Interleave — cycle through models each run.
   --rounds R      Multiple rounds with randomized model order per round.
   --balanced      With --rounds, use Latin-square positional balancing.`,
-		Example: `  ollama-bench gemma4:e4b gemma4:26b gemma4:31b -n 4
-  ollama-bench gemma4:e4b gemma4:26b -n 3 --rounds 4 --cooldown 30
-  ollama-bench gemma4:e4b gemma4:26b -n 3 --rounds 3 --balanced --warmup
-  ollama-bench gemma4:e4b gemma4:26b --tui`,
+		Example: `  ollama-profiler gemma4:e4b gemma4:26b gemma4:31b -n 4
+  ollama-profiler gemma4:e4b gemma4:26b -n 3 --rounds 4 --cooldown 30
+  ollama-profiler gemma4:e4b gemma4:26b -n 3 --rounds 3 --balanced --warmup
+  ollama-profiler gemma4:e4b gemma4:26b --tui`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			resolvedURL := bench.ResolveBaseURL(baseURL)

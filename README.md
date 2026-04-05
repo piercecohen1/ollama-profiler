@@ -1,4 +1,4 @@
-# ollama-bench
+# ollama-profiler
 
 Benchmark and compare [Ollama](https://ollama.com) model performance side-by-side.
 
@@ -18,33 +18,33 @@ Single binary. No dependencies. Works on macOS, Linux, and Windows.
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/piercecohen1/ollama-bench/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/piercecohen1/ollama-profiler/main/install.sh | sh
 ```
 
 Or build from source:
 
 ```sh
-go install github.com/piercecohen1/ollama-bench@latest
+go install github.com/piercecohen1/ollama-profiler@latest
 ```
 
 ## Quick Start
 
 ```sh
 # Compare two models (3 runs each, CLI output)
-ollama-bench gemma4:e4b llama3.2:3b
+ollama-profiler gemma4:e4b llama3.2:3b
 
 # Interactive TUI
-ollama-bench --tui
+ollama-profiler --tui
 
 # Rigorous comparison with balanced scheduling
-ollama-bench gemma4:e4b gemma4:26b gemma4:31b \
+ollama-profiler gemma4:e4b gemma4:26b gemma4:31b \
   -n 4 --rounds 4 --balanced --warmup --cooldown 30
 ```
 
 ## Usage
 
 ```
-ollama-bench [models...] [flags]
+ollama-profiler [models...] [flags]
 ```
 
 | Flag | Description | Default |
@@ -93,7 +93,7 @@ ollama-bench [models...] [flags]
 Press `e` in the TUI results screen to export:
 
 ```
-ollama-bench-2024-01-15-1430/
+ollama-profiler-2024-01-15-1430/
 ├── results.json    # Raw metrics data
 ├── report.html     # Self-contained dark-themed HTML report
 └── charts.png      # Retina-quality bar charts (generated natively)

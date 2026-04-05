@@ -1,8 +1,8 @@
 #!/bin/sh
 set -e
 
-REPO="piercecohen1/ollama-bench"
-BINARY="ollama-bench"
+REPO="piercecohen1/ollama-profiler"
+BINARY="ollama-profiler"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
 # Detect OS

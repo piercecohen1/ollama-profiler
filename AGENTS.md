@@ -1,4 +1,4 @@
-# ollama-bench
+# ollama-profiler
 
 CLI + TUI tool for benchmarking and comparing Ollama model performance side-by-side.
 
@@ -43,7 +43,7 @@ internal/
 
 ### Export (`e` key in results)
 
-Creates a timestamped directory `ollama-bench-YYYY-MM-DD-HHMM/` containing:
+Creates a timestamped directory `ollama-profiler-YYYY-MM-DD-HHMM/` containing:
 - `results.json` — raw metrics data
 - `report.html` — self-contained dark-themed HTML with summary table + bar charts
 - `charts.png` — generated natively via Go `image/png` + `golang.org/x/image/font/gofont/gomono` (no browser needed). 2x resolution for retina quality.
@@ -53,7 +53,7 @@ In charts (HTML/PNG), winner is indicated by green model name text. In TUI chart
 ## Building
 
 ```bash
-go build -o ollama-bench .                     # local build
+go build -o ollama-profiler .                     # local build
 make build                                      # same, with ldflags
 make test                                       # run tests
 make dist                                       # cross-compile all platforms → dist/
@@ -96,8 +96,8 @@ Colors match the "bench" theme (Claude Code-inspired dark palette):
 
 ```bash
 go test ./...                                    # unit tests
-./ollama-bench --tui --dry-run                   # manual TUI testing without Ollama
-./ollama-bench gemma4:e4b llama3.2:3b -n 2       # live CLI test
+./ollama-profiler --tui --dry-run                   # manual TUI testing without Ollama
+./ollama-profiler gemma4:e4b llama3.2:3b -n 2       # live CLI test
 ```
 
 ## Concurrency model

@@ -1,4 +1,4 @@
-module github.com/piercecohen1/ollama-bench
+module github.com/piercecohen1/ollama-profiler
 
 go 1.26.1
 

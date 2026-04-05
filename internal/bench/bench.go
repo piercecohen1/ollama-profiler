@@ -1,4 +1,4 @@
-// Package bench provides the core benchmarking engine for ollama-bench.
+// Package bench provides the core benchmarking engine for ollama-profiler.
 package bench
 
 import (
