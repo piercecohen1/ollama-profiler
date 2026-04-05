@@ -13,6 +13,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -59,13 +60,20 @@ type benchConfig struct {
 	Rounds     int
 	Balanced   bool
 	Cooldown   int
+	NumPredict int
+	Seed       int
+	Think      string
 }
 
-var dryRunMode bool
+var (
+	dryRunMode bool
+	tuiBaseURL string
+)
 
 // Run starts the TUI application.
-func Run(dryRun bool) error {
+func Run(dryRun bool, baseURL string) error {
 	dryRunMode = dryRun
+	tuiBaseURL = baseURL
 	app := tview.NewApplication().EnableMouse(true)
 
 	// Apply bench theme — matches the Python textual "bench" theme
@@ -113,7 +121,7 @@ func buildConfigPage(app *tview.Application, pages *tview.Pages) tview.Primitive
 	if dryRunMode {
 		models = fakeFetchModels()
 	} else {
-		models, err = bench.FetchModels("http://localhost:11434")
+		models, err = bench.FetchModels(tuiBaseURL)
 	}
 
 	modelList.SetUseStyleTags(true, false)
@@ -162,6 +170,9 @@ func buildConfigPage(app *tview.Application, pages *tview.Pages) tview.Primitive
 		AddInputField("Rounds", "3", 6, tview.InputFieldInteger, nil).
 		AddInputField("Cooldown (sec)", "0", 6, tview.InputFieldInteger, nil).
 		AddCheckbox("Warmup", false, nil).
+		AddInputField("Max tokens", "256", 6, tview.InputFieldInteger, nil).
+		AddInputField("Seed", "42", 6, tview.InputFieldInteger, nil).
+		AddDropDown("Think", []string{"Disabled", "Enabled", "Low", "Medium", "High"}, 0, nil).
 		AddInputField("Manual models", "", 40, nil, nil).
 		AddTextArea("Prompt", "Write a 200 word explanation of transformers in ML.", 60, 3, 0, nil)
 
@@ -217,12 +228,14 @@ func buildConfigPage(app *tview.Application, pages *tview.Pages) tview.Primitive
 	form.SetButtonTextColor(colorBg)
 	form.SetLabelColor(colorFg)
 
-	// Style the dropdown list for better contrast
-	if dd, ok := form.GetFormItemByLabel("Schedule").(*tview.DropDown); ok {
-		dd.SetListStyles(
-			tcell.StyleDefault.Foreground(colorFg).Background(colorSurface),       // unselected
-			tcell.StyleDefault.Foreground(colorBg).Background(colorPrimary),        // selected/highlighted
-		)
+	// Style the dropdown lists for better contrast
+	for _, label := range []string{"Schedule", "Think"} {
+		if dd, ok := form.GetFormItemByLabel(label).(*tview.DropDown); ok {
+			dd.SetListStyles(
+				tcell.StyleDefault.Foreground(colorFg).Background(colorSurface),       // unselected
+				tcell.StyleDefault.Foreground(colorBg).Background(colorPrimary),        // selected/highlighted
+			)
+		}
 	}
 
 	// Error text
@@ -287,6 +300,23 @@ func buildConfigPage(app *tview.Application, pages *tview.Pages) tview.Primitive
 
 		warmup := form.GetFormItemByLabel("Warmup").(*tview.Checkbox).IsChecked()
 
+		numPredictStr := form.GetFormItemByLabel("Max tokens").(*tview.InputField).GetText()
+		numPredict, _ := strconv.Atoi(numPredictStr)
+		seedStr := form.GetFormItemByLabel("Seed").(*tview.InputField).GetText()
+		seed, _ := strconv.Atoi(seedStr)
+		thinkIdx, _ := form.GetFormItemByLabel("Think").(*tview.DropDown).GetCurrentOption()
+		thinkVal := ""
+		switch thinkIdx {
+		case 1:
+			thinkVal = "true"
+		case 2:
+			thinkVal = "low"
+		case 3:
+			thinkVal = "medium"
+		case 4:
+			thinkVal = "high"
+		}
+
 		promptItem := form.GetFormItemByLabel("Prompt").(*tview.TextArea)
 		prompt := strings.TrimSpace(promptItem.GetText())
 		if prompt == "" {
@@ -298,12 +328,15 @@ func buildConfigPage(app *tview.Application, pages *tview.Pages) tview.Primitive
 			Models:     selectedModels,
 			Runs:       runs,
 			Prompt:     prompt,
-			BaseURL:    "http://localhost:11434",
+			BaseURL:    tuiBaseURL,
 			Warmup:     warmup,
 			RoundRobin: currentMode == 1,
 			Rounds:     nRounds,
 			Balanced:   currentMode == 3,
 			Cooldown:   cooldown,
+			NumPredict: numPredict,
+			Seed:       seed,
+			Think:      thinkVal,
 		}
 		if currentMode >= 2 && nRounds < 2 {
 			errorText.SetText("[red]Rounds mode requires at least 2 rounds")
@@ -337,9 +370,13 @@ func buildConfigPage(app *tview.Application, pages *tview.Pages) tview.Primitive
 // ── Benchmark Page ──────────────────────────────────────────────────────────
 
 func buildBenchPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig) tview.Primitive {
+	opts := bench.BenchmarkOpts{
+		NumPredict: cfg.NumPredict,
+		Seed:       cfg.Seed,
+		Think:      cfg.Think,
+	}
 	results := make(map[string][]*bench.RunResult)
 	ctx, cancel := context.WithCancel(context.Background())
-	resultsShown := false
 
 	schedule := bench.BuildSchedule(cfg.Models, cfg.Runs, bench.ScheduleConfig{
 		RoundRobin: cfg.RoundRobin,
@@ -430,10 +467,6 @@ func buildBenchPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig
 	}
 
 	showResults := func() {
-		if resultsShown {
-			return
-		}
-		resultsShown = true
 		resultsPage := buildResultsPage(app, pages, cfg, results, cancel)
 		pages.AddPage("results", resultsPage, true, true)
 		pages.SwitchToPage("results")
@@ -489,7 +522,7 @@ func buildBenchPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig
 					if dryRunMode {
 						time.Sleep(50 * time.Millisecond)
 					} else {
-						_, warmupErr = bench.BenchmarkOnce(ctx, model, cfg.Prompt, cfg.BaseURL)
+						_, warmupErr = bench.BenchmarkOnce(ctx, model, cfg.Prompt, cfg.BaseURL, opts)
 					}
 					if ctx.Err() != nil {
 						return
@@ -524,7 +557,7 @@ func buildBenchPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig
 				if dryRunMode {
 					res = fakeBenchmarkOnce(model)
 				} else {
-					res, err = bench.BenchmarkOnce(ctx, model, cfg.Prompt, cfg.BaseURL)
+					res, err = bench.BenchmarkOnce(ctx, model, cfg.Prompt, cfg.BaseURL, opts)
 				}
 				if ctx.Err() != nil {
 					return
@@ -546,8 +579,8 @@ func buildBenchPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig
 						done++
 						results[modelCopy] = append(results[modelCopy], resCopy)
 						addResultRow(modelCopy, rndCopy, runCopy, resCopy)
-						addLogLine(fmt.Sprintf("[green]  ✓ %s R%d/run%d — %.1f tok/s",
-							modelCopy, rndCopy, runCopy, resCopy.EvalRate))
+						addLogLine(fmt.Sprintf("[green]  ✓ %s R%d/run%d — %s tok/s",
+							modelCopy, rndCopy, runCopy, bench.FmtVal(resCopy.EvalRate, "tok/s")))
 						updateProgress()
 					})
 				}
@@ -556,7 +589,6 @@ func buildBenchPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig
 
 		app.QueueUpdateDraw(func() {
 			statusView.SetText("[green]  Complete!")
-			resultsShown = false // allow rebuild with final data
 			showResults()
 		})
 	}()
@@ -569,14 +601,6 @@ func buildBenchPage(app *tview.Application, pages *tview.Pages, cfg *benchConfig
 		AddItem(progressView, 1, 0, false).
 		AddItem(liveTable, 0, 2, false).
 		AddItem(logView, 0, 1, false)
-
-	layout.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyRune && event.Rune() == 'c' {
-			showResults()
-			return nil
-		}
-		return event
-	})
 
 	return layout
 }
@@ -682,7 +706,24 @@ func buildSummaryTable(cfg *benchConfig, results map[string][]*bench.RunResult) 
 		t.SetCell(0, i+1, headerCell(model))
 	}
 
+	// Warn about dropped failed runs
+	warningRow := 0
+	for i, model := range cfg.Models {
+		total := len(results[model])
+		valid := len(validResults(results[model]))
+		if failed := total - valid; failed > 0 {
+			if warningRow == 0 {
+				warningRow = 1
+				t.SetCell(1, 0, tview.NewTableCell("").SetSelectable(false))
+			}
+			t.SetCell(1, i+1, tview.NewTableCell(
+				fmt.Sprintf("%d/%d runs failed", failed, total)).
+				SetTextColor(colorYellow).SetAlign(tview.AlignCenter).SetSelectable(false))
+		}
+	}
+
 	for row, metric := range bench.AllMetrics {
+		row += warningRow
 		t.SetCell(row+1, 0, tview.NewTableCell(metric.Label).
 			SetTextColor(colorFg).SetSelectable(false))
 
@@ -1036,14 +1077,18 @@ func findBestModel(avgs map[string]float64, lowerIsBetter *bool) string {
 	if lowerIsBetter == nil || len(avgs) == 0 {
 		return ""
 	}
-	var best string
-	var bestVal float64
-	first := true
-	for m, v := range avgs {
-		if first {
-			best, bestVal = m, v
-			first = false
-		} else if *lowerIsBetter && v < bestVal {
+	// Sort keys for deterministic tie-breaking (alphabetical)
+	keys := make([]string, 0, len(avgs))
+	for m := range avgs {
+		keys = append(keys, m)
+	}
+	sort.Strings(keys)
+
+	best := keys[0]
+	bestVal := avgs[best]
+	for _, m := range keys[1:] {
+		v := avgs[m]
+		if *lowerIsBetter && v < bestVal {
 			best, bestVal = m, v
 		} else if !*lowerIsBetter && v > bestVal {
 			best, bestVal = m, v
@@ -1077,7 +1122,17 @@ func exportResults(cfg *benchConfig, results map[string][]*bench.RunResult) (str
 }
 
 func exportResultsJSON(cfg *benchConfig, results map[string][]*bench.RunResult, dir string) error {
-	export := make(map[string][]map[string]interface{})
+	schedule := "sequential"
+	if cfg.RoundRobin {
+		schedule = "round-robin"
+	} else if cfg.Rounds > 1 {
+		schedule = "rounds"
+		if cfg.Balanced {
+			schedule = "rounds-balanced"
+		}
+	}
+
+	resultData := make(map[string][]map[string]interface{})
 	for _, model := range cfg.Models {
 		var entries []map[string]interface{}
 		for _, r := range results[model] {
@@ -1096,7 +1151,24 @@ func exportResultsJSON(cfg *benchConfig, results map[string][]*bench.RunResult, 
 			}
 			entries = append(entries, entry)
 		}
-		export[model] = entries
+		resultData[model] = entries
+	}
+
+	export := map[string]interface{}{
+		"meta": map[string]interface{}{
+			"timestamp":   time.Now().Format(time.RFC3339),
+			"models":      cfg.Models,
+			"runs":        cfg.Runs,
+			"rounds":      max(cfg.Rounds, 1),
+			"schedule":    schedule,
+			"warmup":      cfg.Warmup,
+			"cooldown_sec": cfg.Cooldown,
+			"prompt":      cfg.Prompt,
+			"num_predict": cfg.NumPredict,
+			"seed":        cfg.Seed,
+			"think":       cfg.Think,
+		},
+		"results": resultData,
 	}
 	data, err := json.MarshalIndent(export, "", "  ")
 	if err != nil {

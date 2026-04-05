@@ -10,7 +10,10 @@ import (
 	"io"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -266,6 +269,84 @@ func BuildSchedule(models []string, runsPerModel int, cfg ScheduleConfig) [][]st
 	return [][]string{round}
 }
 
+// ── Base URL resolution ─────────────────────────────────────────────────────
+
+// ResolveBaseURL returns the Ollama API base URL, preferring:
+//  1. explicit (if non-empty) — typically from a --url flag
+//  2. OLLAMA_HOST environment variable
+//  3. http://localhost:11434 (default)
+//
+// The returned URL always has a scheme and no trailing slash.
+func ResolveBaseURL(explicit string) string {
+	if explicit != "" {
+		return normalizeHost(explicit)
+	}
+	if envHost := os.Getenv("OLLAMA_HOST"); envHost != "" {
+		return normalizeHost(envHost)
+	}
+	return "http://localhost:11434"
+}
+
+// normalizeHost mirrors Ollama's own Host()/ConnectableHost() semantics:
+//   - no scheme → scheme "http", default port 11434
+//   - "http://" → default port 80; "https://" → default port 443
+//   - scheme matching is case-insensitive
+//   - bare ":port" resolves to http://localhost:port
+//   - unspecified bind addresses (0.0.0.0, ::) are rewritten to localhost for client use
+//   - IPv6 addresses and URL paths are preserved
+//
+// See: github.com/ollama/ollama/envconfig/config.go — Host(), ConnectableHost()
+func normalizeHost(s string) string {
+	const ollamaDefaultPort = "11434"
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "http://localhost:" + ollamaDefaultPort
+	}
+
+	// Extract scheme (case-insensitive). Default port depends on scheme.
+	scheme := "http"
+	defaultPort := ollamaDefaultPort
+	rest := s
+	if i := strings.Index(s, "://"); i >= 0 {
+		scheme = strings.ToLower(s[:i])
+		rest = s[i+3:]
+		switch scheme {
+		case "http":
+			defaultPort = "80"
+		case "https":
+			defaultPort = "443"
+		}
+	}
+
+	// Separate host:port from path.
+	var path string
+	if i := strings.Index(rest, "/"); i >= 0 {
+		path = strings.TrimRight(rest[i:], "/")
+		rest = rest[:i]
+	}
+
+	// Parse host and port.
+	host, port, err := net.SplitHostPort(rest)
+	if err != nil {
+		switch {
+		case strings.HasPrefix(rest, ":"):
+			host, port = "localhost", strings.TrimPrefix(rest, ":")
+		case rest == "":
+			host, port = "localhost", defaultPort
+		default:
+			host, port = strings.Trim(rest, "[]"), defaultPort
+		}
+	}
+
+	// Rewrite unspecified bind addresses to loopback for client connections.
+	switch host {
+	case "0.0.0.0", "::", "":
+		host = "localhost"
+	}
+
+	return scheme + "://" + net.JoinHostPort(host, port) + path
+}
+
 // ── Benchmark execution ─────────────────────────────────────────────────────
 
 // ollamaChunk is a single JSON line from the Ollama streaming response.
@@ -281,9 +362,38 @@ type ollamaChunk struct {
 	EvalDuration       int64  `json:"eval_duration"`
 }
 
+// BenchmarkOpts controls per-request Ollama parameters for reproducible benchmarking.
+type BenchmarkOpts struct {
+	NumPredict int    // >0: limit generated tokens, 0: Ollama default (unlimited)
+	Seed       int    // >0: fixed seed for determinism, 0: random
+	Think      string // "": disabled, "true": enabled, "low"/"medium"/"high": thinking level
+}
+
 // BenchmarkOnce runs a single inference pass against a model and returns metrics.
-func BenchmarkOnce(ctx context.Context, model, prompt, baseURL string) (*RunResult, error) {
-	bodyBytes, _ := json.Marshal(map[string]string{"model": model, "prompt": prompt})
+func BenchmarkOnce(ctx context.Context, model, prompt, baseURL string, opts BenchmarkOpts) (*RunResult, error) {
+	body := map[string]interface{}{
+		"model":  model,
+		"prompt": prompt,
+	}
+	switch opts.Think {
+	case "true":
+		body["think"] = true
+	case "low", "medium", "high":
+		body["think"] = opts.Think
+	default:
+		body["think"] = false
+	}
+	options := map[string]interface{}{}
+	if opts.NumPredict > 0 {
+		options["num_predict"] = opts.NumPredict
+	}
+	if opts.Seed > 0 {
+		options["seed"] = opts.Seed
+	}
+	if len(options) > 0 {
+		body["options"] = options
+	}
+	bodyBytes, _ := json.Marshal(body)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/api/generate", bytes.NewReader(bodyBytes))
 	if err != nil {
@@ -337,11 +447,11 @@ func BenchmarkOnce(ctx context.Context, model, prompt, baseURL string) (*RunResu
 		ttft = float64(firstTokenTime.Sub(start).Milliseconds())
 	}
 
-	pRate := 0.0
+	pRate := math.NaN()
 	if final.PromptEvalDuration > 0 {
 		pRate = float64(final.PromptEvalCount) * 1e9 / float64(final.PromptEvalDuration)
 	}
-	eRate := 0.0
+	eRate := math.NaN()
 	if final.EvalDuration > 0 {
 		eRate = float64(final.EvalCount) * 1e9 / float64(final.EvalDuration)
 	}

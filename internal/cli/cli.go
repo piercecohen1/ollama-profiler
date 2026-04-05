@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -27,6 +28,9 @@ type Config struct {
 	Cooldown   int
 	JSONFile   string
 	NoPerRun   bool
+	NumPredict int
+	Seed       int
+	Think      string
 }
 
 // styles
@@ -65,6 +69,7 @@ func Run(cfg Config) error {
 	fmt.Println(rule(80))
 
 	fmt.Printf("  %s  %s\n", dimStyle.Render("Models:"), strings.Join(cfg.Models, ", "))
+	fmt.Printf("  %s  %s\n", dimStyle.Render("Server:"), cfg.BaseURL)
 
 	modeStr := "sequential"
 	if cfg.RoundRobin {
@@ -85,6 +90,15 @@ func Run(cfg Config) error {
 	}
 	if cfg.Warmup {
 		fmt.Printf("  %s  enabled\n", dimStyle.Render("Warmup:"))
+	}
+	if cfg.NumPredict > 0 {
+		fmt.Printf("  %s  %d tokens\n", dimStyle.Render("Max tokens:"), cfg.NumPredict)
+	}
+	if cfg.Seed > 0 {
+		fmt.Printf("  %s  %d\n", dimStyle.Render("Seed:"), cfg.Seed)
+	}
+	if cfg.Think != "" {
+		fmt.Printf("  %s  %s\n", dimStyle.Render("Think:"), cfg.Think)
 	}
 
 	prompt := cfg.Prompt
@@ -129,7 +143,7 @@ func Run(cfg Config) error {
 
 	// JSON export
 	if cfg.JSONFile != "" {
-		if err := exportJSON(results, cfg.Models, cfg.JSONFile); err != nil {
+		if err := exportJSON(cfg, results, cfg.JSONFile); err != nil {
 			return fmt.Errorf("export failed: %w", err)
 		}
 		fmt.Printf("\n%s\n", dimStyle.Render("Results exported to "+cfg.JSONFile))
@@ -142,6 +156,11 @@ func Run(cfg Config) error {
 // ── Benchmark runner ────────────────────────────────────────────────────────
 
 func runBenchmarks(cfg Config, schedule [][]string) map[string][]*bench.RunResult {
+	opts := bench.BenchmarkOpts{
+		NumPredict: cfg.NumPredict,
+		Seed:       cfg.Seed,
+		Think:      cfg.Think,
+	}
 	results := make(map[string][]*bench.RunResult)
 	nRounds := len(schedule)
 	total := 0
@@ -198,7 +217,7 @@ func runBenchmarks(cfg Config, schedule [][]string) map[string][]*bench.RunResul
 			if cfg.Warmup && !warmedUp[model] {
 				warmedUp[model] = true
 				progress(fmt.Sprintf("Warmup: %s", model))
-				_, err := bench.BenchmarkOnce(context.Background(), model, cfg.Prompt, cfg.BaseURL)
+				_, err := bench.BenchmarkOnce(context.Background(), model, cfg.Prompt, cfg.BaseURL, opts)
 				if err != nil {
 					clearLine()
 					fmt.Printf("  %s\n", yellowStyle.Render(fmt.Sprintf("⚠ warmup failed for %s: %v", model, err)))
@@ -216,7 +235,7 @@ func runBenchmarks(cfg Config, schedule [][]string) map[string][]*bench.RunResul
 			}
 			progress(desc)
 
-			res, err := bench.BenchmarkOnce(context.Background(), model, cfg.Prompt, cfg.BaseURL)
+			res, err := bench.BenchmarkOnce(context.Background(), model, cfg.Prompt, cfg.BaseURL, opts)
 			if err != nil {
 				clearLine()
 				fmt.Printf("  %s\n", redStyle.Render(fmt.Sprintf("✗ %s: %v", model, err)))
@@ -316,6 +335,16 @@ func showPerRun(results map[string][]*bench.RunResult, models []string, nRounds 
 }
 
 func showSummary(results map[string][]*bench.RunResult, models []string) {
+	// Warn about dropped failed runs
+	for _, model := range models {
+		total := len(results[model])
+		valid := len(validRuns(results[model]))
+		if failed := total - valid; failed > 0 {
+			fmt.Printf("  %s\n", yellowStyle.Render(
+				fmt.Sprintf("warning: %d of %d runs failed for %s (dropped from averages)", failed, total, model)))
+		}
+	}
+
 	fmt.Println(headerStyle.Render("  Comparison Summary"))
 	fmt.Println()
 
@@ -456,14 +485,18 @@ func findBest(avgs map[string]float64, lowerIsBetter *bool) string {
 	if lowerIsBetter == nil || len(avgs) == 0 {
 		return ""
 	}
-	var best string
-	var bestVal float64
-	first := true
-	for m, v := range avgs {
-		if first {
-			best, bestVal = m, v
-			first = false
-		} else if *lowerIsBetter && v < bestVal {
+	// Sort keys for deterministic tie-breaking (alphabetical)
+	keys := make([]string, 0, len(avgs))
+	for m := range avgs {
+		keys = append(keys, m)
+	}
+	sort.Strings(keys)
+
+	best := keys[0]
+	bestVal := avgs[best]
+	for _, m := range keys[1:] {
+		v := avgs[m]
+		if *lowerIsBetter && v < bestVal {
 			best, bestVal = m, v
 		} else if !*lowerIsBetter && v > bestVal {
 			best, bestVal = m, v
@@ -472,9 +505,19 @@ func findBest(avgs map[string]float64, lowerIsBetter *bool) string {
 	return best
 }
 
-func exportJSON(results map[string][]*bench.RunResult, models []string, path string) error {
-	export := make(map[string][]map[string]interface{})
-	for _, model := range models {
+func exportJSON(cfg Config, results map[string][]*bench.RunResult, path string) error {
+	schedule := "sequential"
+	if cfg.RoundRobin {
+		schedule = "round-robin"
+	} else if cfg.Rounds > 1 {
+		schedule = "rounds"
+		if cfg.Balanced {
+			schedule = "rounds-balanced"
+		}
+	}
+
+	resultData := make(map[string][]map[string]interface{})
+	for _, model := range cfg.Models {
 		var entries []map[string]interface{}
 		for _, r := range results[model] {
 			if r == nil || r.Error != nil {
@@ -492,7 +535,24 @@ func exportJSON(results map[string][]*bench.RunResult, models []string, path str
 			}
 			entries = append(entries, entry)
 		}
-		export[model] = entries
+		resultData[model] = entries
+	}
+
+	export := map[string]interface{}{
+		"meta": map[string]interface{}{
+			"timestamp":   time.Now().Format(time.RFC3339),
+			"models":      cfg.Models,
+			"runs":        cfg.Runs,
+			"rounds":      max(cfg.Rounds, 1),
+			"schedule":    schedule,
+			"warmup":      cfg.Warmup,
+			"cooldown_sec": cfg.Cooldown,
+			"prompt":      cfg.Prompt,
+			"num_predict": cfg.NumPredict,
+			"seed":        cfg.Seed,
+			"think":       cfg.Think,
+		},
+		"results": resultData,
 	}
 	data, err := json.MarshalIndent(export, "", "  ")
 	if err != nil {

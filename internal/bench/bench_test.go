@@ -5,6 +5,47 @@ import (
 	"testing"
 )
 
+// ── ResolveBaseURL tests ────────────────────────────────────────────────────
+
+func TestResolveBaseURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		explicit string
+		envHost  string
+		want     string
+	}{
+		{"default", "", "", "http://localhost:11434"},
+		{"explicit full URL", "http://example.com:8080", "", "http://example.com:8080"},
+		{"https default port", "https://api.example.com", "", "https://api.example.com:443"},
+		{"http default port", "http://remotebox", "", "http://remotebox:80"},
+		{"plain host no scheme gets 11434", "remotebox", "", "http://remotebox:11434"},
+		{"explicit host:port", "gpu-box:11434", "", "http://gpu-box:11434"},
+		{"explicit bare port", ":9999", "", "http://localhost:9999"},
+		{"trailing slash trimmed", "http://host:11434/", "", "http://host:11434"},
+		{"url with path preserved", "http://host:11434/api/v1", "", "http://host:11434/api/v1"},
+		{"uppercase scheme lowercased", "HTTP://host:8080", "", "http://host:8080"},
+		{"unspecified ipv4 rewritten to localhost", "0.0.0.0:11434", "", "http://localhost:11434"},
+		{"unspecified ipv6 rewritten to localhost", "[::]:11434", "", "http://localhost:11434"},
+		{"ipv6 loopback preserved", "[::1]:11434", "", "http://[::1]:11434"},
+		{"env var fallback", "", "remote:11434", "http://remote:11434"},
+		{"env var full URL", "", "http://remote:11434", "http://remote:11434"},
+		{"env var bare port", "", ":12345", "http://localhost:12345"},
+		{"env var 0.0.0.0 rewritten", "", "0.0.0.0:11434", "http://localhost:11434"},
+		{"env var plain host", "", "gpu-server", "http://gpu-server:11434"},
+		{"explicit overrides env", "http://explicit:1111", "http://envvar:2222", "http://explicit:1111"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("OLLAMA_HOST", tt.envHost)
+			got := ResolveBaseURL(tt.explicit)
+			if got != tt.want {
+				t.Errorf("ResolveBaseURL(%q) with OLLAMA_HOST=%q = %q, want %q",
+					tt.explicit, tt.envHost, got, tt.want)
+			}
+		})
+	}
+}
+
 // ── FmtVal tests ────────────────────────────────────────────────────────────
 
 func TestFmtVal(t *testing.T) {
@@ -171,7 +212,8 @@ func TestBuildSchedule_Balanced(t *testing.T) {
 }
 
 func TestBuildSchedule_BalancedFullLatinSquare(t *testing.T) {
-	// With rounds == len(models), each model should be first exactly once
+	// With rounds == len(models) and runsPerModel=1, each model should
+	// appear in every position (column) exactly once across all rounds.
 	models := []string{"A", "B", "C", "D"}
 	sched := BuildSchedule(models, 1, ScheduleConfig{Rounds: 4, Balanced: true})
 
@@ -179,13 +221,25 @@ func TestBuildSchedule_BalancedFullLatinSquare(t *testing.T) {
 		t.Fatalf("expected 4 rounds, got %d", len(sched))
 	}
 
-	firstPositions := map[string]int{}
-	for _, round := range sched {
-		firstPositions[round[0]]++
+	// colCounts[pos][model] = number of times model appears at position pos
+	colCounts := make([]map[string]int, len(models))
+	for i := range colCounts {
+		colCounts[i] = map[string]int{}
 	}
-	for _, m := range models {
-		if firstPositions[m] != 1 {
-			t.Errorf("model %q was first %d times, want 1", m, firstPositions[m])
+	for _, round := range sched {
+		if len(round) != len(models) {
+			t.Fatalf("round length = %d, want %d", len(round), len(models))
+		}
+		for pos, m := range round {
+			colCounts[pos][m]++
+		}
+	}
+
+	for pos, counts := range colCounts {
+		for _, m := range models {
+			if counts[m] != 1 {
+				t.Errorf("column %d: model %q appears %d times, want 1", pos, m, counts[m])
+			}
 		}
 	}
 }
