@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -1091,12 +1090,6 @@ func findBestModel(avgs map[string]float64, lowerIsBetter *bool) string {
 // ── Export ───────────────────────────────────────────────────────────────────
 
 func exportResults(cfg *benchConfig, results map[string][]*bench.RunResult) (string, error) {
-	ts := time.Now().Format("2006-01-02-1504")
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("getting working directory: %w", err)
-	}
-	dir := fmt.Sprintf("%s/ollama-profiler-%s", cwd, ts)
 	expCfg := export.Config{
 		Models:     cfg.Models,
 		Runs:       cfg.Runs,
@@ -1110,9 +1103,6 @@ func exportResults(cfg *benchConfig, results map[string][]*bench.RunResult) (str
 		Seed:       cfg.Seed,
 		Think:      cfg.Think,
 	}
-	if err := export.Bundle(expCfg, results, dir); err != nil {
-		return "", err
-	}
-	return dir, nil
+	return export.Bundle(expCfg, results, "")
 }
 

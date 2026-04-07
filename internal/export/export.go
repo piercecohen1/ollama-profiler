@@ -37,29 +37,31 @@ type Config struct {
 	Think      string
 }
 
-// Bundle creates a timestamped directory with JSON, HTML, and PNG exports.
-func Bundle(cfg Config, results map[string][]*bench.RunResult, dir string) error {
+// Bundle creates a directory with JSON, HTML, and PNG exports.
+// If dir is empty, a timestamped directory is created in the current working directory.
+// Returns the directory path used.
+func Bundle(cfg Config, results map[string][]*bench.RunResult, dir string) (string, error) {
 	if dir == "" {
 		ts := time.Now().Format("2006-01-02-1504")
 		cwd, err := os.Getwd()
 		if err != nil {
-			return fmt.Errorf("getting working directory: %w", err)
+			return "", fmt.Errorf("getting working directory: %w", err)
 		}
 		dir = fmt.Sprintf("%s/ollama-profiler-%s", cwd, ts)
 	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creating export directory: %w", err)
+		return "", fmt.Errorf("creating export directory: %w", err)
 	}
 	if err := JSON(cfg, results, dir+"/results.json"); err != nil {
-		return fmt.Errorf("exporting JSON: %w", err)
+		return "", fmt.Errorf("exporting JSON: %w", err)
 	}
 	if err := HTML(cfg, results, dir+"/report.html"); err != nil {
-		return fmt.Errorf("exporting HTML: %w", err)
+		return "", fmt.Errorf("exporting HTML: %w", err)
 	}
 	if err := PNG(cfg, results, dir+"/charts.png"); err != nil {
-		return fmt.Errorf("exporting PNG: %w", err)
+		return "", fmt.Errorf("exporting PNG: %w", err)
 	}
-	return nil
+	return dir, nil
 }
 
 // JSON exports raw results with metadata to the given path.

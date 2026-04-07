@@ -345,7 +345,7 @@ func TestBundle_CreatesAllFiles(t *testing.T) {
 	dir := t.TempDir()
 	bundleDir := filepath.Join(dir, "test-bundle")
 
-	err := Bundle(testConfig(), testResults(), bundleDir)
+	_, err := Bundle(testConfig(), testResults(), bundleDir)
 	if err != nil {
 		t.Fatalf("Bundle() returned error: %v", err)
 	}
@@ -363,7 +363,7 @@ func TestBundle_CreatesDirectoryIfNotExists(t *testing.T) {
 	dir := t.TempDir()
 	bundleDir := filepath.Join(dir, "nested", "deep", "bundle")
 
-	err := Bundle(testConfig(), testResults(), bundleDir)
+	_, err := Bundle(testConfig(), testResults(), bundleDir)
 	if err != nil {
 		t.Fatalf("Bundle() returned error: %v", err)
 	}
@@ -378,20 +378,20 @@ func TestBundle_CreatesDirectoryIfNotExists(t *testing.T) {
 }
 
 func TestBundle_AutoTimestampDir(t *testing.T) {
-	// When dir is empty, Bundle creates a timestamped directory in cwd
-	err := Bundle(testConfig(), testResults(), "")
+	// When dir is empty, Bundle creates a timestamped directory in cwd and returns its path
+	dir, err := Bundle(testConfig(), testResults(), "")
 	if err != nil {
 		t.Fatalf("Bundle() returned error: %v", err)
 	}
-
-	// Clean up — find the created directory
-	cwd, _ := os.Getwd()
-	entries, _ := os.ReadDir(cwd)
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "ollama-profiler-") && e.IsDir() {
-			os.RemoveAll(filepath.Join(cwd, e.Name()))
-		}
+	if dir == "" {
+		t.Fatal("Bundle() returned empty dir")
 	}
+	if !strings.Contains(dir, "ollama-profiler-") {
+		t.Errorf("Bundle() dir %q does not contain expected prefix", dir)
+	}
+
+	// Clean up the auto-created directory
+	os.RemoveAll(dir)
 }
 
 func TestBundle_JSONContentsMatchStandalone(t *testing.T) {
@@ -401,7 +401,7 @@ func TestBundle_JSONContentsMatchStandalone(t *testing.T) {
 
 	// Export via bundle
 	bundleDir := filepath.Join(dir, "bundle")
-	Bundle(cfg, results, bundleDir)
+	Bundle(cfg, results, bundleDir) //nolint:errcheck
 	bundleJSON, _ := os.ReadFile(filepath.Join(bundleDir, "results.json"))
 
 	// Export standalone

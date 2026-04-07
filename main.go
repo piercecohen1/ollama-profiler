@@ -82,6 +82,10 @@ Scheduling modes:
 				return fmt.Errorf("--cooldown requires --rounds > 1")
 			}
 
+			if exportDir != "" && (jsonFile != "" || htmlFile != "" || pngFile != "") {
+				return fmt.Errorf("--export cannot be combined with --json, --html, or --png")
+			}
+
 			if promptFile != "" {
 				data, err := os.ReadFile(promptFile)
 				if err != nil {

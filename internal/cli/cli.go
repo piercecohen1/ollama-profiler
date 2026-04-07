@@ -159,10 +159,11 @@ func Run(cfg Config) error {
 	}
 
 	if cfg.ExportDir != "" {
-		if err := export.Bundle(expCfg, results, cfg.ExportDir); err != nil {
+		dir, err := export.Bundle(expCfg, results, cfg.ExportDir)
+		if err != nil {
 			return fmt.Errorf("export failed: %w", err)
 		}
-		fmt.Printf("\n%s\n", dimStyle.Render("Results exported to "+cfg.ExportDir))
+		fmt.Printf("\n%s\n", dimStyle.Render("Results exported to "+dir))
 	} else {
 		if cfg.JSONFile != "" {
 			if err := export.JSON(expCfg, results, cfg.JSONFile); err != nil {
