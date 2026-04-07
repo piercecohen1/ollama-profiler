@@ -18,10 +18,13 @@ internal/
     bench.go                # Metrics, RunResult, scheduling, Ollama API, model listing
     bench_test.go           # Table-driven tests for Stats, FmtVal, BuildSchedule
   cli/
-    cli.go                  # CLI-mode output: progress bar, per-run tables, summary, relative, JSON export
+    cli.go                  # CLI-mode output: progress bar, per-run tables, summary, relative
+  export/
+    export.go               # Shared export: JSON, HTML, PNG, Bundle (used by both CLI and TUI)
+    export_test.go          # Integration tests for all export formats
   tui/
     tui.go                  # TUI-mode: config screen, benchmark screen, results screen (4 tabs),
-                            #   export (JSON + HTML + PNG), dry-run fake data
+                            #   export via shared export package, dry-run fake data
 ```
 
 ### Core concepts
@@ -43,9 +46,14 @@ internal/
 2. **Benchmark**: Progress bar, live results Table, scrolling log TextView. Benchmarks run in a goroutine with `context.Context` for cancellation; all shared state (`results` map, `done` counter) is mutated inside `QueueUpdateDraw()` callbacks to avoid data races. A `resultsShown` guard prevents duplicate results page creation.
 3. **Results**: 4 tabs (Summary, Per-Run, Relative, Charts) switchable via tab/arrows. Summary and Relative color-code winners (green) and losers (yellow <10%, red >10%). Charts use Unicode block characters for horizontal bar charts.
 
-### Export (`e` key in results)
+### Export
 
-Creates a timestamped directory `ollama-profiler-YYYY-MM-DD-HHMM/` containing:
+Export logic lives in `internal/export/` and is shared by both CLI and TUI.
+
+**TUI**: Press `e` on the results screen to create a full bundle.  
+**CLI**: Use `--export DIR` for the full bundle, or `--json FILE`, `--html FILE`, `--png FILE` individually.
+
+The full bundle creates a directory containing:
 - `results.json` — raw metrics data wrapped in `{"meta": {...}, "results": {...}}` with full benchmark config for reproducibility
 - `report.html` — self-contained dark-themed HTML with summary table + bar charts
 - `charts.png` — generated natively via Go `image/png` + `golang.org/x/image/font/gofont/gomono` (no browser needed). 2x resolution for retina quality.
@@ -85,7 +93,10 @@ Cross-compilation targets: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64,
 | `--num-predict N` | Max tokens to generate per run (default 256, 0 = unlimited). Controls output length for fair comparison |
 | `--seed N` | Random seed for deterministic output (default 42, 0 = random) |
 | `--think` | Allow model thinking tokens (disabled by default; affects TTFT measurement). Accepts `true`, `low`, `medium`, `high` |
-| `--json FILE` | Export raw results with metadata (CLI mode only) |
+| `--json FILE` | Export raw results with metadata to JSON file (CLI mode only) |
+| `--html FILE` | Export HTML report to file (CLI mode only) |
+| `--png FILE` | Export charts PNG to file (CLI mode only) |
+| `--export DIR` | Export full bundle (JSON + HTML + PNG) to directory (CLI mode only) |
 | `--no-per-run` | Skip per-run detail tables (CLI mode only) |
 | `-p, --prompt` | Prompt text (default: transformers explanation) |
 | `--prompt-file` | Read prompt from file |
