@@ -12,7 +12,7 @@ Measure tokens/sec, time-to-first-token, and 7 other metrics across your local m
 
 ## Installation
 
-This Go tool can be installed directly [from PyPI](https://pypi.org/project/ollama-profiler/) using `pip` or `uv`.
+This Go tool can be installed directly [from PyPI](https://pypi.org/project/ollama-profiler/) using `uv`.
 
 You can run it without installing it first using `uvx`:
 
@@ -25,7 +25,7 @@ Or install it, then run `ollama-profiler`:
 ```bash
 uv tool install ollama-profiler
 # or
-pip install ollama-profiler
+pipx install ollama-profiler
 ```
 
 <details>
