@@ -1,39 +1,49 @@
 # ollama-profiler
 
-Profile and compare [Ollama](https://ollama.com) model performance side-by-side.
-
-[![PyPI](https://img.shields.io/pypi/v/ollama-profiler)](https://pypi.org/project/ollama-profiler/)
+[![PyPI](https://img.shields.io/pypi/v/ollama-profiler.svg)](https://pypi.org/project/ollama-profiler/)
 [![Tests](https://github.com/piercecohen1/ollama-profiler/actions/workflows/test.yml/badge.svg)](https://github.com/piercecohen1/ollama-profiler/actions/workflows/test.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+Profile and compare [Ollama](https://ollama.com) model performance side-by-side.
 
 Measure tokens/sec, time-to-first-token, and 7 other metrics across your local models. Interactive TUI or rich CLI. Export to JSON, HTML, or PNG.
 
-## Install
+![demo](.github/demo.gif)
 
-```sh
-# Run directly — no install needed
+## Installation
+
+This Go tool can be installed directly [from PyPI](https://pypi.org/project/ollama-profiler/) using `pip` or `uv`.
+
+You can run it without installing it first using `uvx`:
+
+```bash
 uvx ollama-profiler --help
+```
 
-# Or install globally
+Or install it, then run `ollama-profiler`:
+
+```bash
+uv tool install ollama-profiler
+# or
 pip install ollama-profiler
 ```
 
 <details>
 <summary>Other install methods</summary>
 
-```sh
-# Go
-go install github.com/piercecohen1/ollama-profiler@latest
+You can also install the Go binary directly:
 
-# Direct binary (macOS/Linux)
-curl -fsSL https://raw.githubusercontent.com/piercecohen1/ollama-profiler/main/install.sh | sh
+```bash
+go install github.com/piercecohen1/ollama-profiler@latest
 ```
+
+Compiled binaries are available [on the releases page](https://github.com/piercecohen1/ollama-profiler/releases).
 
 </details>
 
 ## Quick Start
 
-```sh
+```bash
 # Compare two models
 ollama-profiler gemma4:e4b llama3.2:3b
 
