@@ -1,39 +1,43 @@
 # ollama-profiler
 
-Benchmark and compare [Ollama](https://ollama.com) model performance side-by-side.
+Profile and compare [Ollama](https://ollama.com) model performance side-by-side.
 
-Single binary. No dependencies. Works on macOS, Linux, and Windows.
+[![PyPI](https://img.shields.io/pypi/v/ollama-profiler)](https://pypi.org/project/ollama-profiler/)
+[![Tests](https://github.com/piercecohen1/ollama-profiler/actions/workflows/test.yml/badge.svg)](https://github.com/piercecohen1/ollama-profiler/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## Features
-
-- **Side-by-side comparison** of multiple models on identical prompts
-- **Interactive TUI** with live progress, color-coded results, and Unicode bar charts
-- **Rich CLI mode** with styled terminal output (no TUI required)
-- **Multiple scheduling modes** — sequential, round-robin, randomized rounds, or Latin-square balanced
-- **Statistical summary** — mean, stddev, min/max, relative performance, winner highlighting
-- **Export** — JSON, self-contained HTML report, and retina-quality PNG charts
-- **Warmup & cooldown** — control for cold-start and thermal throttling effects
-- **Dry-run mode** — test the UI without a running Ollama instance
+Measure tokens/sec, time-to-first-token, and 7 other metrics across your local models. Interactive TUI or rich CLI. Export to JSON, HTML, or PNG.
 
 ## Install
 
 ```sh
+# Run directly — no install needed
+uvx ollama-profiler --help
+
+# Or install globally
+pip install ollama-profiler
+```
+
+<details>
+<summary>Other install methods</summary>
+
+```sh
+# Go
+go install github.com/piercecohen1/ollama-profiler@latest
+
+# Direct binary (macOS/Linux)
 curl -fsSL https://raw.githubusercontent.com/piercecohen1/ollama-profiler/main/install.sh | sh
 ```
 
-Or build from source:
-
-```sh
-go install github.com/piercecohen1/ollama-profiler@latest
-```
+</details>
 
 ## Quick Start
 
 ```sh
-# Compare two models (3 runs each, CLI output)
+# Compare two models
 ollama-profiler gemma4:e4b llama3.2:3b
 
-# Interactive TUI
+# Interactive TUI with mouse support
 ollama-profiler --tui
 
 # Rigorous comparison with balanced scheduling
@@ -41,68 +45,16 @@ ollama-profiler gemma4:e4b gemma4:26b gemma4:31b \
   -n 4 --rounds 4 --balanced --warmup --cooldown 30
 ```
 
-## Usage
+## Features
 
-```
-ollama-profiler [models...] [flags]
-```
+- **Side-by-side comparison** of multiple models on the same prompt
+- **TUI + CLI** — interactive full-screen UI or styled terminal output
+- **Fair scheduling** — sequential, round-robin, randomized rounds, or Latin-square balanced
+- **Statistical summary** — mean, stddev, min/max, relative %, color-coded winners
+- **Export** — JSON with metadata, self-contained HTML report, retina PNG charts
+- **Reproducible** — deterministic seed, configurable token limits, warmup & cooldown
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--tui` | Interactive TUI mode | — |
-| `-n, --runs` | Runs per model per round | `3` |
-| `--rounds N` | Number of rounds (randomized order per round) | `1` |
-| `--balanced` | Latin-square positional balancing (with `--rounds`) | — |
-| `--round-robin` | Interleave models each run | — |
-| `--warmup` | Uncounted warmup run per model | — |
-| `--cooldown SEC` | Sleep between rounds | `0` |
-| `-p, --prompt` | Prompt text | `"Write a 200 word explanation..."` |
-| `--prompt-file` | Read prompt from file | — |
-| `--num-predict N` | Max tokens to generate per run (0 = unlimited) | `256` |
-| `--seed N` | Random seed for deterministic output (0 = random) | `42` |
-| `--think` | Allow model thinking tokens | — |
-| `--json FILE` | Export results to JSON (includes metadata) | — |
-| `--no-per-run` | Skip per-run detail tables | — |
-| `--dry-run` | Fake data, no Ollama needed | — |
-| `--url` | Ollama API base URL | `$OLLAMA_HOST` or `http://localhost:11434` |
-
-## Scheduling Modes
-
-| Mode | Flag | Behavior |
-|------|------|----------|
-| Sequential | *(default)* | All runs of A, then B, then C. Model stays loaded in VRAM. |
-| Round Robin | `--round-robin` | Cycle A, B, C, A, B, C... Forces model reloading. |
-| Random Rounds | `--rounds N` | N rounds, model order randomized each round. |
-| Balanced | `--rounds N --balanced` | Latin-square rotation for positional fairness. Requires `N >= len(models)`. |
-
-## Metrics
-
-| Metric | Unit | Description |
-|--------|------|-------------|
-| TTFT | ms | Time to first token |
-| Generation TPS | tok/s | Token generation throughput |
-| Prompt Eval TPS | tok/s | Prompt processing throughput |
-| Total Duration | ms | End-to-end inference time |
-| Load Duration | ms | Model load time |
-| Eval Time | ms | Generation duration |
-| Prompt Tokens | tok | Input token count |
-| Generated Tokens | tok | Output token count |
-
-## Export
-
-Press `e` in the TUI results screen to export:
-
-```
-ollama-profiler-2024-01-15-1430/
-├── results.json    # Raw metrics data
-├── report.html     # Self-contained dark-themed HTML report
-└── charts.png      # Retina-quality bar charts (generated natively)
-```
-
-## Requirements
-
-- [Ollama](https://ollama.com) running locally (or specify `--url` for remote)
-- At least one model pulled (`ollama pull gemma4:e4b`)
+Requires [Ollama](https://ollama.com) running locally, or pass `--url` for a remote server. Run `ollama-profiler --help` for full usage.
 
 ## License
 
