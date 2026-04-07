@@ -1,0 +1,46 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+
+      - name: Run tests
+        run: go test ./... -v
+
+      - name: Build binary
+        run: go build -ldflags "-X main.version=ci-test" -o ollama-profiler${{ matrix.os == 'windows-latest' && '.exe' || '' }} .
+
+      - name: Verify --version
+        run: ./ollama-profiler${{ matrix.os == 'windows-latest' && '.exe' || '' }} --version
+
+      - name: Verify --help
+        run: ./ollama-profiler${{ matrix.os == 'windows-latest' && '.exe' || '' }} --help
+
+      - name: Smoke test (invalid model, expect graceful error)
+        shell: bash
+        run: |
+          # Should fail with a connection error (no Ollama running), not a crash/panic
+          set +e
+          output=$(./ollama-profiler${{ matrix.os == 'windows-latest' && '.exe' || '' }} nonexistent-model -n 1 2>&1)
+          exit_code=$?
+          echo "$output"
+          if echo "$output" | grep -qi "panic"; then
+            echo "FAIL: binary panicked"
+            exit 1
+          fi
+          echo "PASS: exited with code $exit_code (no panic)"
