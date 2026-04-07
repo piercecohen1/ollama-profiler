@@ -369,6 +369,15 @@ type BenchmarkOpts struct {
 	Think      string // "": disabled, "true": enabled, "low"/"medium"/"high": thinking level
 }
 
+// OllamaConnectionError wraps connection failures with a user-friendly message.
+func OllamaConnectionError(baseURL string, err error) error {
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return fmt.Errorf("could not connect to Ollama at %s\n\n  Is Ollama running? Start it with: ollama serve\n  Install from: https://ollama.com\n\n  To use a different server: --url <host:port> or set OLLAMA_HOST", baseURL)
+	}
+	return err
+}
+
 // BenchmarkOnce runs a single inference pass against a model and returns metrics.
 func BenchmarkOnce(ctx context.Context, model, prompt, baseURL string, opts BenchmarkOpts) (*RunResult, error) {
 	body := map[string]interface{}{
@@ -406,7 +415,7 @@ func BenchmarkOnce(ctx context.Context, model, prompt, baseURL string, opts Benc
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("connecting to Ollama: %w", err)
+		return nil, OllamaConnectionError(baseURL, err)
 	}
 	defer resp.Body.Close()
 
@@ -486,7 +495,7 @@ func FetchModels(baseURL string) ([]OllamaModel, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(baseURL + "/api/tags")
 	if err != nil {
-		return nil, err
+		return nil, OllamaConnectionError(baseURL, err)
 	}
 	defer resp.Body.Close()
 
