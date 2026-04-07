@@ -3,16 +3,15 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
-	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/piercecohen1/ollama-profiler/internal/bench"
+	"github.com/piercecohen1/ollama-profiler/internal/export"
 )
 
 // Config holds the CLI benchmark configuration.
@@ -27,6 +26,9 @@ type Config struct {
 	Balanced   bool
 	Cooldown   int
 	JSONFile   string
+	HTMLFile   string
+	PNGFile    string
+	ExportDir  string
 	NoPerRun   bool
 	NumPredict int
 	Seed       int
@@ -141,12 +143,45 @@ func Run(cfg Config) error {
 	fmt.Println()
 	showRelative(results, cfg.Models)
 
-	// JSON export
-	if cfg.JSONFile != "" {
-		if err := exportJSON(cfg, results, cfg.JSONFile); err != nil {
+	// Exports
+	expCfg := export.Config{
+		Models:     cfg.Models,
+		Runs:       cfg.Runs,
+		Rounds:     cfg.Rounds,
+		RoundRobin: cfg.RoundRobin,
+		Balanced:   cfg.Balanced,
+		Warmup:     cfg.Warmup,
+		Cooldown:   cfg.Cooldown,
+		Prompt:     cfg.Prompt,
+		NumPredict: cfg.NumPredict,
+		Seed:       cfg.Seed,
+		Think:      cfg.Think,
+	}
+
+	if cfg.ExportDir != "" {
+		if err := export.Bundle(expCfg, results, cfg.ExportDir); err != nil {
 			return fmt.Errorf("export failed: %w", err)
 		}
-		fmt.Printf("\n%s\n", dimStyle.Render("Results exported to "+cfg.JSONFile))
+		fmt.Printf("\n%s\n", dimStyle.Render("Results exported to "+cfg.ExportDir))
+	} else {
+		if cfg.JSONFile != "" {
+			if err := export.JSON(expCfg, results, cfg.JSONFile); err != nil {
+				return fmt.Errorf("JSON export failed: %w", err)
+			}
+			fmt.Printf("\n%s\n", dimStyle.Render("JSON exported to "+cfg.JSONFile))
+		}
+		if cfg.HTMLFile != "" {
+			if err := export.HTML(expCfg, results, cfg.HTMLFile); err != nil {
+				return fmt.Errorf("HTML export failed: %w", err)
+			}
+			fmt.Printf("\n%s\n", dimStyle.Render("HTML exported to "+cfg.HTMLFile))
+		}
+		if cfg.PNGFile != "" {
+			if err := export.PNG(expCfg, results, cfg.PNGFile); err != nil {
+				return fmt.Errorf("PNG export failed: %w", err)
+			}
+			fmt.Printf("\n%s\n", dimStyle.Render("PNG exported to "+cfg.PNGFile))
+		}
 	}
 
 	fmt.Println()
@@ -505,58 +540,3 @@ func findBest(avgs map[string]float64, lowerIsBetter *bool) string {
 	return best
 }
 
-func exportJSON(cfg Config, results map[string][]*bench.RunResult, path string) error {
-	schedule := "sequential"
-	if cfg.RoundRobin {
-		schedule = "round-robin"
-	} else if cfg.Rounds > 1 {
-		schedule = "rounds"
-		if cfg.Balanced {
-			schedule = "rounds-balanced"
-		}
-	}
-
-	resultData := make(map[string][]map[string]interface{})
-	for _, model := range cfg.Models {
-		var entries []map[string]interface{}
-		for _, r := range results[model] {
-			if r == nil || r.Error != nil {
-				entries = append(entries, nil)
-				continue
-			}
-			entry := map[string]interface{}{}
-			for _, m := range bench.AllMetrics {
-				v := r.Get(m.Key)
-				if math.IsNaN(v) || math.IsInf(v, 0) {
-					entry[m.Key] = nil
-				} else {
-					entry[m.Key] = v
-				}
-			}
-			entries = append(entries, entry)
-		}
-		resultData[model] = entries
-	}
-
-	export := map[string]interface{}{
-		"meta": map[string]interface{}{
-			"timestamp":   time.Now().Format(time.RFC3339),
-			"models":      cfg.Models,
-			"runs":        cfg.Runs,
-			"rounds":      max(cfg.Rounds, 1),
-			"schedule":    schedule,
-			"warmup":      cfg.Warmup,
-			"cooldown_sec": cfg.Cooldown,
-			"prompt":      cfg.Prompt,
-			"num_predict": cfg.NumPredict,
-			"seed":        cfg.Seed,
-			"think":       cfg.Think,
-		},
-		"results": resultData,
-	}
-	data, err := json.MarshalIndent(export, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0644)
-}

@@ -23,6 +23,9 @@ var (
 	balanced   bool
 	cooldown   int
 	jsonFile   string
+	htmlFile   string
+	pngFile    string
+	exportDir  string
 	noPerRun   bool
 	useTUI     bool
 	dryRun     bool
@@ -98,6 +101,9 @@ Scheduling modes:
 				Balanced:   balanced,
 				Cooldown:   cooldown,
 				JSONFile:   jsonFile,
+				HTMLFile:   htmlFile,
+				PNGFile:    pngFile,
+				ExportDir:  exportDir,
 				NoPerRun:   noPerRun,
 				NumPredict: numPredict,
 				Seed:       seed,
@@ -117,6 +123,9 @@ Scheduling modes:
 	f.BoolVar(&balanced, "balanced", false, "With --rounds, use Latin-square positional balancing")
 	f.IntVar(&cooldown, "cooldown", 0, "Seconds to sleep between rounds (thermal recovery)")
 	f.StringVar(&jsonFile, "json", "", "Export raw results to JSON file")
+	f.StringVar(&htmlFile, "html", "", "Export HTML report to file")
+	f.StringVar(&pngFile, "png", "", "Export charts PNG to file")
+	f.StringVar(&exportDir, "export", "", "Export full bundle (JSON + HTML + PNG) to directory")
 	f.BoolVar(&noPerRun, "no-per-run", false, "Skip per-run detail tables")
 	f.IntVar(&numPredict, "num-predict", 256, "Max tokens to generate per run (0 = unlimited)")
 	f.IntVar(&seed, "seed", 42, "Random seed for deterministic output (0 = random)")
