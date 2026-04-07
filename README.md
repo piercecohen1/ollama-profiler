@@ -44,14 +44,18 @@ Compiled binaries are available [on the releases page](https://github.com/pierce
 ## Quick Start
 
 ```bash
-# Compare two models
-ollama-profiler gemma4:e4b llama3.2:3b
+# First, make sure you have some models to test
+ollama pull gemma4:e2b
+ollama pull qwen3.5:2b
+
+# Compare them
+ollama-profiler gemma4:e2b qwen3.5:2b
 
 # Interactive TUI with mouse support
 ollama-profiler --tui
 
 # Rigorous comparison with balanced scheduling
-ollama-profiler gemma4:e4b gemma4:26b gemma4:31b \
+ollama-profiler gemma4:e2b qwen3.5:2b \
   -n 4 --rounds 4 --balanced --warmup --cooldown 30
 ```
 
