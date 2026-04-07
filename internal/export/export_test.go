@@ -401,7 +401,9 @@ func TestBundle_JSONContentsMatchStandalone(t *testing.T) {
 
 	// Export via bundle
 	bundleDir := filepath.Join(dir, "bundle")
-	Bundle(cfg, results, bundleDir) //nolint:errcheck
+	if _, err := Bundle(cfg, results, bundleDir); err != nil {
+		t.Fatalf("Bundle() error: %v", err)
+	}
 	bundleJSON, _ := os.ReadFile(filepath.Join(bundleDir, "results.json"))
 
 	// Export standalone
