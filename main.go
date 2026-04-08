@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/piercecohen1/ollama-profiler/internal/bench"
 	"github.com/piercecohen1/ollama-profiler/internal/cli"
@@ -91,14 +92,18 @@ Scheduling modes (CLI):
 			// Reject duplicate output paths among standalone export flags.
 			if jsonFile != "" || htmlFile != "" || pngFile != "" {
 				paths := map[string]string{}
-				for flag, path := range map[string]string{"--json": jsonFile, "--html": htmlFile, "--png": pngFile} {
-					if path == "" {
+				for flag, raw := range map[string]string{"--json": jsonFile, "--html": htmlFile, "--png": pngFile} {
+					if raw == "" {
 						continue
 					}
-					if prev, ok := paths[path]; ok {
-						return fmt.Errorf("%s and %s resolve to the same output path %q", prev, flag, path)
+					abs, err := filepath.Abs(filepath.Clean(raw))
+					if err != nil {
+						abs = raw
 					}
-					paths[path] = flag
+					if prev, ok := paths[abs]; ok {
+						return fmt.Errorf("%s and %s resolve to the same output path %q", prev, flag, abs)
+					}
+					paths[abs] = flag
 				}
 			}
 
