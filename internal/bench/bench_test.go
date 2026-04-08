@@ -1,8 +1,13 @@
 package bench
 
 import (
+	"context"
+	"encoding/json"
+	"io"
 	"math"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -377,6 +382,7 @@ func TestOllamaConnectionError_RemoteURL(t *testing.T) {
 
 func TestOllamaConnectionError_NotRunning(t *testing.T) {
 	// Create a fake "ollama" binary on PATH so LookPath succeeds.
+	// Use a localhost URL to exercise the isLocalURL → LookPath path.
 	tmp := t.TempDir()
 	fakeBin := filepath.Join(tmp, "ollama")
 	if runtime.GOOS == "windows" {
@@ -387,13 +393,13 @@ func TestOllamaConnectionError_NotRunning(t *testing.T) {
 	}
 	t.Setenv("PATH", tmp)
 
-	got := OllamaConnectionError("http://gpu-box:11434", newOpError())
+	got := OllamaConnectionError("http://localhost:11434", newOpError())
 	msg := got.Error()
 
 	if !strings.Contains(msg, "could not connect") {
 		t.Errorf("expected 'could not connect' message, got: %s", msg)
 	}
-	if !strings.Contains(msg, "gpu-box:11434") {
+	if !strings.Contains(msg, "localhost:11434") {
 		t.Errorf("expected base URL in message, got: %s", msg)
 	}
 	if strings.Contains(msg, "not installed") {
@@ -448,5 +454,170 @@ func TestRunResult_Get(t *testing.T) {
 	}
 	if v := r.Get("eval_count"); v != 552 {
 		t.Errorf("Get(eval_count) = %v, want 552", v)
+	}
+}
+
+// ── BenchmarkOnce integration tests ────────────────────────────────────────
+
+func TestBenchmarkOnce_NumPredictZeroSendsMinusOne(t *testing.T) {
+	var gotBody map[string]interface{}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &gotBody)
+
+		// Return a minimal valid streaming response (one chunk with done=true).
+		chunk := map[string]interface{}{
+			"done":                 true,
+			"total_duration":       1000000000,
+			"load_duration":        100000000,
+			"prompt_eval_count":    10,
+			"prompt_eval_duration": 50000000,
+			"eval_count":           20,
+			"eval_duration":        200000000,
+		}
+		json.NewEncoder(w).Encode(chunk)
+	}))
+	defer srv.Close()
+
+	BenchmarkOnce(context.Background(), "test-model", "hello", srv.URL, BenchmarkOpts{
+		NumPredict: 0,
+		Seed:       42,
+	})
+
+	opts, ok := gotBody["options"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected options map in request body")
+	}
+	np, ok := opts["num_predict"]
+	if !ok {
+		t.Fatal("expected num_predict in options")
+	}
+	if np != float64(-1) {
+		t.Errorf("num_predict = %v, want -1", np)
+	}
+}
+
+func TestBenchmarkOnce_NumPredictPositiveSendsValue(t *testing.T) {
+	var gotBody map[string]interface{}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &gotBody)
+
+		chunk := map[string]interface{}{
+			"done":                 true,
+			"total_duration":       1000000000,
+			"load_duration":        100000000,
+			"prompt_eval_count":    10,
+			"prompt_eval_duration": 50000000,
+			"eval_count":           20,
+			"eval_duration":        200000000,
+		}
+		json.NewEncoder(w).Encode(chunk)
+	}))
+	defer srv.Close()
+
+	BenchmarkOnce(context.Background(), "test-model", "hello", srv.URL, BenchmarkOpts{
+		NumPredict: 512,
+		Seed:       42,
+	})
+
+	opts, ok := gotBody["options"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected options map in request body")
+	}
+	np, ok := opts["num_predict"]
+	if !ok {
+		t.Fatal("expected num_predict in options")
+	}
+	if np != float64(512) {
+		t.Errorf("num_predict = %v, want 512", np)
+	}
+}
+
+func TestBenchmarkOnce_ErrorResponseSurfacesMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(404)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "model 'noexist' not found",
+		})
+	}))
+	defer srv.Close()
+
+	_, err := BenchmarkOnce(context.Background(), "noexist", "hello", srv.URL, BenchmarkOpts{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "model 'noexist' not found") {
+		t.Errorf("error should contain Ollama message, got: %s", msg)
+	}
+	if !strings.Contains(msg, "404") {
+		t.Errorf("error should contain status code, got: %s", msg)
+	}
+}
+
+func TestBenchmarkOnce_ErrorResponseFallbackOnBadJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+		w.Write([]byte("internal server error"))
+	}))
+	defer srv.Close()
+
+	_, err := BenchmarkOnce(context.Background(), "test", "hello", srv.URL, BenchmarkOpts{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "500") {
+		t.Errorf("error should contain status code, got: %s", msg)
+	}
+	if strings.Contains(msg, "Ollama error") {
+		t.Errorf("should use generic message for unparseable body, got: %s", msg)
+	}
+}
+
+// ── FetchModels integration tests ──────────────────────────────────────────
+
+func TestFetchModels_ErrorResponseSurfacesMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(503)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "server is loading model",
+		})
+	}))
+	defer srv.Close()
+
+	_, err := FetchModels(srv.URL)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "server is loading model") {
+		t.Errorf("error should contain Ollama message, got: %s", msg)
+	}
+	if !strings.Contains(msg, "503") {
+		t.Errorf("error should contain status code, got: %s", msg)
+	}
+}
+
+func TestFetchModels_ErrorResponseFallbackOnBadJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(502)
+		w.Write([]byte("bad gateway"))
+	}))
+	defer srv.Close()
+
+	_, err := FetchModels(srv.URL)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "502") {
+		t.Errorf("error should contain status code, got: %s", msg)
+	}
+	if strings.Contains(msg, "Ollama error") {
+		t.Errorf("should use generic message for unparseable body, got: %s", msg)
 	}
 }
