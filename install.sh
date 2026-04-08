@@ -21,7 +21,7 @@ case "$ARCH" in
     *)               echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
-ASSET="${BINARY}-${OS}-${ARCH}"
+ASSET="${BINARY}-${OS}-${ARCH}.tar.gz"
 URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
 
 echo "Downloading ${BINARY} for ${OS}/${ARCH}..."
@@ -29,14 +29,15 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$URL" -o "${TMP}/${BINARY}"
+    curl -fsSL "$URL" -o "${TMP}/${ASSET}"
 elif command -v wget >/dev/null 2>&1; then
-    wget -q "$URL" -O "${TMP}/${BINARY}"
+    wget -q "$URL" -O "${TMP}/${ASSET}"
 else
     echo "Error: curl or wget required"
     exit 1
 fi
 
+tar -xzf "${TMP}/${ASSET}" -C "${TMP}"
 chmod +x "${TMP}/${BINARY}"
 
 # Install
