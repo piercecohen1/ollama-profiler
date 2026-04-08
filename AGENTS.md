@@ -8,8 +8,8 @@ CLI + TUI tool for benchmarking and comparing Ollama model performance side-by-s
 
 Single Go binary (`main.go` at the repo root) with two modes:
 
-- **CLI mode** (default): Non-interactive, rich terminal output via lipgloss. Entry point: `internal/cli/cli.go`
-- **TUI mode** (`--tui`): Interactive full-screen UI via tview with mouse support. Entry point: `internal/tui/tui.go`
+- **TUI mode** (default): Interactive full-screen UI via tview with mouse support. Entry point: `internal/tui/tui.go`
+- **CLI mode** (when model args provided): Non-interactive, rich terminal output via lipgloss. Entry point: `internal/cli/cli.go`
 
 ### Package layout
 
@@ -91,7 +91,6 @@ Cross-compilation targets: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64,
 
 | Flag | Description |
 |------|-------------|
-| `--tui` | Launch interactive TUI |
 | `--dry-run` | Fake data, no Ollama needed (50ms per run) |
 | `-n, --runs` | Runs per model per round (default 3) |
 | `--rounds R` | Number of rounds with randomized order |
@@ -113,7 +112,7 @@ Cross-compilation targets: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64,
 
 ### Flag validation
 
-- At least one model required unless `--tui`
+- No args → launches TUI; model args → CLI mode
 - `--runs` >= 1, `--rounds` >= 1, `--cooldown` >= 0
 - `--round-robin` and `--rounds` are mutually exclusive
 - `--balanced` requires `--rounds > 1`
@@ -132,7 +131,7 @@ Colors match the "bench" theme (Claude Code-inspired dark palette):
 
 ```bash
 go test ./...                                    # unit tests
-./ollama-profiler --tui --dry-run                   # manual TUI testing without Ollama
+./ollama-profiler --dry-run                         # manual TUI testing without Ollama
 ./ollama-profiler gemma4:e4b llama3.2:3b -n 2       # live CLI test
 ```
 

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/piercecohen1/ollama-profiler/internal/bench"
 	"github.com/piercecohen1/ollama-profiler/internal/cli"
@@ -27,7 +28,6 @@ var (
 	pngFile    string
 	exportDir  string
 	noPerRun   bool
-	useTUI     bool
 	dryRun     bool
 	numPredict int
 	seed       int
@@ -41,25 +41,28 @@ func main() {
 		Short:   "Benchmark and compare Ollama models side-by-side",
 		Long: `ollama-profiler — Compare Ollama model performance side-by-side.
 
-Scheduling modes:
+Launches the interactive TUI by default. Pass model names as arguments
+for non-interactive CLI mode.
+
+Scheduling modes (CLI):
   (default)       Sequential — all runs of model A, then B, then C.
   --round-robin   Interleave — cycle through models each run.
   --rounds R      Multiple rounds with randomized model order per round.
   --balanced      With --rounds, use Latin-square positional balancing.`,
-		Example: `  ollama-profiler gemma4:e4b gemma4:26b gemma4:31b -n 4
+		Example: `  ollama-profiler                                               # interactive TUI
+  ollama-profiler --dry-run                                     # TUI with fake data
+  ollama-profiler gemma4:e4b gemma4:26b gemma4:31b -n 4         # CLI mode
   ollama-profiler gemma4:e4b gemma4:26b -n 3 --rounds 4 --cooldown 30
-  ollama-profiler gemma4:e4b gemma4:26b -n 3 --rounds 3 --balanced --warmup
-  ollama-profiler gemma4:e4b gemma4:26b --tui`,
+  ollama-profiler gemma4:e4b gemma4:26b -n 3 --rounds 3 --balanced --warmup`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			resolvedURL := bench.ResolveBaseURL(baseURL)
 
-			if useTUI {
-				return tui.Run(dryRun, resolvedURL)
-			}
-
 			if len(args) == 0 {
-				return fmt.Errorf("at least one model is required (or use --tui for interactive mode)")
+				if jsonFile != "" || htmlFile != "" || pngFile != "" || exportDir != "" {
+					return fmt.Errorf("--json, --html, --png, and --export are only valid in CLI mode (pass model names as arguments)")
+				}
+				return tui.Run(dryRun, resolvedURL)
 			}
 
 			if runs < 1 {
@@ -84,6 +87,24 @@ Scheduling modes:
 
 			if exportDir != "" && (jsonFile != "" || htmlFile != "" || pngFile != "") {
 				return fmt.Errorf("--export cannot be combined with --json, --html, or --png")
+			}
+
+			// Reject duplicate output paths among standalone export flags.
+			if jsonFile != "" || htmlFile != "" || pngFile != "" {
+				paths := map[string]string{}
+				for flag, raw := range map[string]string{"--json": jsonFile, "--html": htmlFile, "--png": pngFile} {
+					if raw == "" {
+						continue
+					}
+					abs, err := filepath.Abs(filepath.Clean(raw))
+					if err != nil {
+						abs = raw
+					}
+					if prev, ok := paths[abs]; ok {
+						return fmt.Errorf("%s and %s resolve to the same output path %q", prev, flag, abs)
+					}
+					paths[abs] = flag
+				}
 			}
 
 			if promptFile != "" {
@@ -135,8 +156,7 @@ Scheduling modes:
 	f.IntVar(&seed, "seed", 42, "Random seed for deterministic output (0 = random)")
 	f.StringVar(&think, "think", "", `Thinking mode: "true", "low", "medium", "high" (default: disabled)`)
 	f.Lookup("think").NoOptDefVal = "true"
-	f.BoolVar(&useTUI, "tui", false, "Launch interactive TUI")
-	f.BoolVar(&dryRun, "dry-run", false, "Use fake data to test TUI without Ollama")
+	f.BoolVar(&dryRun, "dry-run", false, "Use fake data (TUI launches with simulated benchmarks)")
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
