@@ -51,5 +51,5 @@ fi
 echo "Installed ${BINARY} to ${INSTALL_DIR}/${BINARY}"
 echo ""
 echo "Usage:"
-echo "  ${BINARY} gemma4:e4b gemma4:26b -n 3"
-echo "  ${BINARY} --tui"
+echo "  ${BINARY}                              # interactive TUI"
+echo "  ${BINARY} gemma4:e4b gemma4:26b -n 3   # CLI mode"
