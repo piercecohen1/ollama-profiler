@@ -219,6 +219,13 @@ func BuildSchedule(models []string, runsPerModel int, cfg ScheduleConfig) [][]st
 	if nRounds <= 1 {
 		nRounds = 1
 	}
+	if len(models) == 0 {
+		rounds := make([][]string, nRounds)
+		for i := range rounds {
+			rounds[i] = []string{}
+		}
+		return rounds
+	}
 
 	if nRounds > 1 {
 		rounds := make([][]string, nRounds)

@@ -7,13 +7,40 @@ import (
 	"math"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
+
+type testServer struct {
+	URL string
+}
+
+func newIPv4TestServer(t *testing.T, handler http.Handler) *testServer {
+	t.Helper()
+
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen tcp4: %v", err)
+	}
+
+	srv := &http.Server{Handler: handler}
+	go func() {
+		_ = srv.Serve(listener)
+	}()
+
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+		_ = listener.Close()
+	})
+
+	return &testServer{URL: "http://" + listener.Addr().String()}
+}
 
 // ── ResolveBaseURL tests ────────────────────────────────────────────────────
 
@@ -281,6 +308,19 @@ func TestBuildSchedule_BalancedRoundsGreaterThanModels(t *testing.T) {
 	}
 }
 
+func TestBuildSchedule_EmptyModelsBalancedDoesNotPanic(t *testing.T) {
+	sched := BuildSchedule(nil, 1, ScheduleConfig{Rounds: 2, Balanced: true})
+
+	if len(sched) != 2 {
+		t.Fatalf("expected 2 rounds, got %d", len(sched))
+	}
+	for i, round := range sched {
+		if len(round) != 0 {
+			t.Errorf("round %d length = %d, want 0", i, len(round))
+		}
+	}
+}
+
 func TestBuildSchedule_SequentialGrouping(t *testing.T) {
 	// In rounds mode, within a round, each model's runs should be grouped
 	models := []string{"A", "B"}
@@ -462,7 +502,7 @@ func TestRunResult_Get(t *testing.T) {
 func TestBenchmarkOnce_NumPredictZeroSendsMinusOne(t *testing.T) {
 	var gotBody map[string]interface{}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newIPv4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		json.Unmarshal(body, &gotBody)
 
@@ -478,7 +518,6 @@ func TestBenchmarkOnce_NumPredictZeroSendsMinusOne(t *testing.T) {
 		}
 		json.NewEncoder(w).Encode(chunk)
 	}))
-	defer srv.Close()
 
 	BenchmarkOnce(context.Background(), "test-model", "hello", srv.URL, BenchmarkOpts{
 		NumPredict: 0,
@@ -501,7 +540,7 @@ func TestBenchmarkOnce_NumPredictZeroSendsMinusOne(t *testing.T) {
 func TestBenchmarkOnce_NumPredictPositiveSendsValue(t *testing.T) {
 	var gotBody map[string]interface{}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newIPv4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		json.Unmarshal(body, &gotBody)
 
@@ -516,7 +555,6 @@ func TestBenchmarkOnce_NumPredictPositiveSendsValue(t *testing.T) {
 		}
 		json.NewEncoder(w).Encode(chunk)
 	}))
-	defer srv.Close()
 
 	BenchmarkOnce(context.Background(), "test-model", "hello", srv.URL, BenchmarkOpts{
 		NumPredict: 512,
@@ -536,14 +574,126 @@ func TestBenchmarkOnce_NumPredictPositiveSendsValue(t *testing.T) {
 	}
 }
 
+func TestBenchmarkOnce_ThinkSerialization(t *testing.T) {
+	tests := []struct {
+		name      string
+		think     string
+		wantThink interface{}
+	}{
+		{"disabled", "", false},
+		{"enabled", "true", true},
+		{"low", "low", "low"},
+		{"medium", "medium", "medium"},
+		{"high", "high", "high"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotBody map[string]interface{}
+
+			srv := newIPv4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				json.Unmarshal(body, &gotBody)
+				json.NewEncoder(w).Encode(map[string]interface{}{"done": true})
+			}))
+
+			_, err := BenchmarkOnce(context.Background(), "test-model", "hello", srv.URL, BenchmarkOpts{Think: tt.think})
+			if err != nil {
+				t.Fatalf("BenchmarkOnce() error: %v", err)
+			}
+
+			if got := gotBody["think"]; got != tt.wantThink {
+				t.Errorf("think = %#v, want %#v", got, tt.wantThink)
+			}
+		})
+	}
+}
+
+func TestBenchmarkOnce_SeedZeroOmitsSeed(t *testing.T) {
+	var gotBody map[string]interface{}
+
+	srv := newIPv4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &gotBody)
+		json.NewEncoder(w).Encode(map[string]interface{}{"done": true})
+	}))
+
+	_, err := BenchmarkOnce(context.Background(), "test-model", "hello", srv.URL, BenchmarkOpts{Seed: 0})
+	if err != nil {
+		t.Fatalf("BenchmarkOnce() error: %v", err)
+	}
+
+	opts, ok := gotBody["options"]
+	if ok {
+		if optMap, ok := opts.(map[string]interface{}); ok {
+			if _, exists := optMap["seed"]; exists {
+				t.Fatalf("seed should be omitted when Seed == 0, got options=%v", optMap)
+			}
+		}
+	}
+}
+
+func TestBenchmarkOnce_NoFinalChunkErrors(t *testing.T) {
+	srv := newIPv4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"response": "partial",
+			"done":     false,
+		})
+	}))
+
+	_, err := BenchmarkOnce(context.Background(), "test-model", "hello", srv.URL, BenchmarkOpts{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "no final chunk received") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBenchmarkOnce_BadJSONChunkErrors(t *testing.T) {
+	srv := newIPv4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("{not-json"))
+	}))
+
+	_, err := BenchmarkOnce(context.Background(), "test-model", "hello", srv.URL, BenchmarkOpts{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "decoding response from test-model") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBenchmarkOnce_ZeroDurationsProduceNaN(t *testing.T) {
+	srv := newIPv4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"done":                 true,
+			"prompt_eval_count":    10,
+			"prompt_eval_duration": 0,
+			"eval_count":           20,
+			"eval_duration":        0,
+		})
+	}))
+
+	res, err := BenchmarkOnce(context.Background(), "test-model", "hello", srv.URL, BenchmarkOpts{})
+	if err != nil {
+		t.Fatalf("BenchmarkOnce() error: %v", err)
+	}
+	if !math.IsNaN(res.PromptEvalRate) {
+		t.Errorf("PromptEvalRate = %v, want NaN", res.PromptEvalRate)
+	}
+	if !math.IsNaN(res.EvalRate) {
+		t.Errorf("EvalRate = %v, want NaN", res.EvalRate)
+	}
+}
+
 func TestBenchmarkOnce_ErrorResponseSurfacesMessage(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newIPv4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(404)
 		json.NewEncoder(w).Encode(map[string]string{
 			"error": "model 'noexist' not found",
 		})
 	}))
-	defer srv.Close()
 
 	_, err := BenchmarkOnce(context.Background(), "noexist", "hello", srv.URL, BenchmarkOpts{})
 	if err == nil {
@@ -559,11 +709,10 @@ func TestBenchmarkOnce_ErrorResponseSurfacesMessage(t *testing.T) {
 }
 
 func TestBenchmarkOnce_ErrorResponseFallbackOnBadJSON(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newIPv4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
 		w.Write([]byte("internal server error"))
 	}))
-	defer srv.Close()
 
 	_, err := BenchmarkOnce(context.Background(), "test", "hello", srv.URL, BenchmarkOpts{})
 	if err == nil {
@@ -581,13 +730,12 @@ func TestBenchmarkOnce_ErrorResponseFallbackOnBadJSON(t *testing.T) {
 // ── FetchModels integration tests ──────────────────────────────────────────
 
 func TestFetchModels_ErrorResponseSurfacesMessage(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newIPv4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(503)
 		json.NewEncoder(w).Encode(map[string]string{
 			"error": "server is loading model",
 		})
 	}))
-	defer srv.Close()
 
 	_, err := FetchModels(srv.URL)
 	if err == nil {
@@ -603,11 +751,10 @@ func TestFetchModels_ErrorResponseSurfacesMessage(t *testing.T) {
 }
 
 func TestFetchModels_ErrorResponseFallbackOnBadJSON(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newIPv4TestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(502)
 		w.Write([]byte("bad gateway"))
 	}))
-	defer srv.Close()
 
 	_, err := FetchModels(srv.URL)
 	if err == nil {

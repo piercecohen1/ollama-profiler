@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/piercecohen1/ollama-profiler/internal/bench"
 	"github.com/piercecohen1/ollama-profiler/internal/cli"
@@ -12,6 +13,8 @@ import (
 )
 
 var version = "dev"
+
+const defaultPrompt = "Write a 200 word explanation of transformers in ML."
 
 var (
 	runs       int
@@ -34,7 +37,20 @@ var (
 	think      string
 )
 
+var (
+	runCLI = cli.Run
+	runTUI = tui.Run
+)
+
 func main() {
+	if err := newRootCmd().Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func newRootCmd() *cobra.Command {
+	resetFlagDefaults()
+
 	rootCmd := &cobra.Command{
 		Use:     "ollama-profiler [models...]",
 		Version: version,
@@ -55,91 +71,12 @@ Scheduling modes (CLI):
   ollama-profiler gemma4:e4b gemma4:26b -n 3 --rounds 4 --cooldown 30
   ollama-profiler gemma4:e4b gemma4:26b -n 3 --rounds 3 --balanced --warmup`,
 		Args: cobra.ArbitraryArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			resolvedURL := bench.ResolveBaseURL(baseURL)
-
-			if len(args) == 0 {
-				if jsonFile != "" || htmlFile != "" || pngFile != "" || exportDir != "" {
-					return fmt.Errorf("--json, --html, --png, and --export are only valid in CLI mode (pass model names as arguments)")
-				}
-				return tui.Run(dryRun, resolvedURL)
-			}
-
-			if runs < 1 {
-				return fmt.Errorf("--runs must be at least 1")
-			}
-			if rounds < 1 {
-				return fmt.Errorf("--rounds must be at least 1")
-			}
-			if cooldown < 0 {
-				return fmt.Errorf("--cooldown must be non-negative")
-			}
-
-			if roundRobin && rounds > 1 {
-				return fmt.Errorf("--round-robin and --rounds are mutually exclusive")
-			}
-			if balanced && rounds <= 1 {
-				return fmt.Errorf("--balanced requires --rounds > 1")
-			}
-			if cooldown > 0 && rounds <= 1 && !roundRobin {
-				return fmt.Errorf("--cooldown requires --rounds > 1")
-			}
-
-			if exportDir != "" && (jsonFile != "" || htmlFile != "" || pngFile != "") {
-				return fmt.Errorf("--export cannot be combined with --json, --html, or --png")
-			}
-
-			// Reject duplicate output paths among standalone export flags.
-			if jsonFile != "" || htmlFile != "" || pngFile != "" {
-				paths := map[string]string{}
-				for flag, raw := range map[string]string{"--json": jsonFile, "--html": htmlFile, "--png": pngFile} {
-					if raw == "" {
-						continue
-					}
-					abs, err := filepath.Abs(filepath.Clean(raw))
-					if err != nil {
-						abs = raw
-					}
-					if prev, ok := paths[abs]; ok {
-						return fmt.Errorf("%s and %s resolve to the same output path %q", prev, flag, abs)
-					}
-					paths[abs] = flag
-				}
-			}
-
-			if promptFile != "" {
-				data, err := os.ReadFile(promptFile)
-				if err != nil {
-					return fmt.Errorf("reading prompt file: %w", err)
-				}
-				prompt = string(data)
-			}
-
-			return cli.Run(cli.Config{
-				Models:     args,
-				Runs:       runs,
-				Prompt:     prompt,
-				BaseURL:    resolvedURL,
-				Warmup:     warmup,
-				RoundRobin: roundRobin,
-				Rounds:     rounds,
-				Balanced:   balanced,
-				Cooldown:   cooldown,
-				JSONFile:   jsonFile,
-				HTMLFile:   htmlFile,
-				PNGFile:    pngFile,
-				ExportDir:  exportDir,
-				NoPerRun:   noPerRun,
-				NumPredict: numPredict,
-				Seed:       seed,
-				Think:      think,
-			})
-		},
+		RunE: runRoot,
 	}
 
 	f := rootCmd.Flags()
 	f.IntVarP(&runs, "runs", "n", 3, "Runs per model per round")
-	f.StringVarP(&prompt, "prompt", "p", "Write a 200 word explanation of transformers in ML.", "Prompt to send")
+	f.StringVarP(&prompt, "prompt", "p", defaultPrompt, "Prompt to send")
 	f.StringVar(&promptFile, "prompt-file", "", "Read prompt from file")
 	f.StringVar(&baseURL, "url", "", "Ollama API base URL (default: $OLLAMA_HOST or http://localhost:11434)")
 	f.BoolVar(&warmup, "warmup", false, "Run each model once before benchmarking (not counted)")
@@ -158,8 +95,129 @@ Scheduling modes (CLI):
 	f.Lookup("think").NoOptDefVal = "true"
 	f.BoolVar(&dryRun, "dry-run", false, "Use fake data (TUI launches with simulated benchmarks)")
 
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
-	}
+	return rootCmd
 }
 
+func resetFlagDefaults() {
+	runs = 3
+	prompt = defaultPrompt
+	promptFile = ""
+	baseURL = ""
+	warmup = false
+	roundRobin = false
+	rounds = 1
+	balanced = false
+	cooldown = 0
+	jsonFile = ""
+	htmlFile = ""
+	pngFile = ""
+	exportDir = ""
+	noPerRun = false
+	dryRun = false
+	numPredict = 256
+	seed = 42
+	think = ""
+}
+
+func runRoot(cmd *cobra.Command, args []string) error {
+	resolvedURL := bench.ResolveBaseURL(baseURL)
+
+	if len(args) == 0 {
+		if jsonFile != "" || htmlFile != "" || pngFile != "" || exportDir != "" {
+			return fmt.Errorf("--json, --html, --png, and --export are only valid in CLI mode (pass model names as arguments)")
+		}
+		return runTUI(dryRun, resolvedURL)
+	}
+
+	if dryRun {
+		return fmt.Errorf("--dry-run is only valid in TUI mode (without model names)")
+	}
+	if runs < 1 {
+		return fmt.Errorf("--runs must be at least 1")
+	}
+	if rounds < 1 {
+		return fmt.Errorf("--rounds must be at least 1")
+	}
+	if cooldown < 0 {
+		return fmt.Errorf("--cooldown must be non-negative")
+	}
+	if numPredict < 0 {
+		return fmt.Errorf("--num-predict must be non-negative")
+	}
+	if seed < 0 {
+		return fmt.Errorf("--seed must be non-negative")
+	}
+	if err := validateThinkFlag(think); err != nil {
+		return err
+	}
+	think = strings.ToLower(strings.TrimSpace(think))
+
+	if roundRobin && rounds > 1 {
+		return fmt.Errorf("--round-robin and --rounds are mutually exclusive")
+	}
+	if balanced && rounds <= 1 {
+		return fmt.Errorf("--balanced requires --rounds > 1")
+	}
+	if cooldown > 0 && rounds <= 1 && !roundRobin {
+		return fmt.Errorf("--cooldown requires --rounds > 1")
+	}
+
+	if exportDir != "" && (jsonFile != "" || htmlFile != "" || pngFile != "") {
+		return fmt.Errorf("--export cannot be combined with --json, --html, or --png")
+	}
+
+	// Reject duplicate output paths among standalone export flags.
+	if jsonFile != "" || htmlFile != "" || pngFile != "" {
+		paths := map[string]string{}
+		for flag, raw := range map[string]string{"--json": jsonFile, "--html": htmlFile, "--png": pngFile} {
+			if raw == "" {
+				continue
+			}
+			abs, err := filepath.Abs(filepath.Clean(raw))
+			if err != nil {
+				abs = raw
+			}
+			if prev, ok := paths[abs]; ok {
+				return fmt.Errorf("%s and %s resolve to the same output path %q", prev, flag, abs)
+			}
+			paths[abs] = flag
+		}
+	}
+
+	if promptFile != "" {
+		data, err := os.ReadFile(promptFile)
+		if err != nil {
+			return fmt.Errorf("reading prompt file: %w", err)
+		}
+		prompt = string(data)
+	}
+
+	return runCLI(cli.Config{
+		Models:     args,
+		Runs:       runs,
+		Prompt:     prompt,
+		BaseURL:    resolvedURL,
+		Warmup:     warmup,
+		RoundRobin: roundRobin,
+		Rounds:     rounds,
+		Balanced:   balanced,
+		Cooldown:   cooldown,
+		JSONFile:   jsonFile,
+		HTMLFile:   htmlFile,
+		PNGFile:    pngFile,
+		ExportDir:  exportDir,
+		NoPerRun:   noPerRun,
+		NumPredict: numPredict,
+		Seed:       seed,
+		Think:      think,
+	})
+}
+
+func validateThinkFlag(value string) error {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "true", "low", "medium", "high":
+		return nil
+	default:
+		return fmt.Errorf(`--think must be one of: "true", "low", "medium", "high"`)
+	}
+}
