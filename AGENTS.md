@@ -39,7 +39,7 @@ internal/
   - **Sequential** (default): All N runs of model A, then B, then C. Model stays loaded in VRAM.
   - **Round-robin** (`--round-robin`): Interleave A,B,C,A,B,C...
   - **Rounds** (`--rounds R`): R rounds with randomized model order per round (controls for thermal throttling).
-  - **Balanced** (`--rounds R --balanced`): Latin-square rotation for positional fairness. Requires `rounds >= len(models)`; validated in both TUI and CLI. Uses simple modular rotation (`r % len(models)`) for clean positional cycling.
+  - **Balanced** (`--rounds R --balanced`): Latin-square rotation for positional fairness. CLI validates `rounds > 1`; TUI additionally validates `rounds >= len(models)`. Uses simple modular rotation (`r % len(models)`) for clean positional cycling.
 - **Stats**: `Stats()` computes mean/stddev/min/max, filtering NaN values. Zero-duration rates from Ollama (e.g. cached prompts) are stored as NaN to avoid poisoning averages.
 - **BenchmarkOpts**: Controls Ollama request parameters (`num_predict`, `seed`, `think`) passed to `/api/generate` for reproducible benchmarking. Defaults: 256 max tokens, seed 42, thinking disabled.
 - **ResolveBaseURL**: Resolves the Ollama server URL in priority order: explicit `--url` flag → `OLLAMA_HOST` env var → `http://localhost:11434`. Normalizes scheme (adds `http://` if missing), handles bare port (`:11434`), and trims trailing slashes. Both CLI and TUI use this. The TUI receives the resolved URL via `tui.Run(dryRun, baseURL)`.
@@ -47,8 +47,8 @@ internal/
 ### TUI screens
 
 1. **Config**: tview List (model multi-select with click/space/enter toggle) + Form (runs, schedule dropdown, rounds, cooldown, warmup, max tokens, seed, think, manual models, prompt). Models auto-detected from Ollama `/api/tags`.
-2. **Benchmark**: Progress bar, live results Table, scrolling log TextView. Benchmarks run in a goroutine with `context.Context` for cancellation; all shared state (`results` map, `done` counter) is mutated inside `QueueUpdateDraw()` callbacks to avoid data races. A `resultsShown` guard prevents duplicate results page creation.
-3. **Results**: 4 tabs (Summary, Per-Run, Relative, Charts) switchable via tab/arrows. Summary and Relative color-code winners (green) and losers (yellow <10%, red >10%). Charts use Unicode block characters for horizontal bar charts.
+2. **Benchmark**: Progress bar, live results Table, scrolling log TextView. Benchmarks run in a goroutine with `context.Context` for cancellation; all shared state (`results` map, `done` counter) is mutated inside `QueueUpdateDraw()` callbacks to avoid data races.
+3. **Results**: 4 tabs (Summary, Per-Run, Relative, Charts) switchable via tab/arrows. Summary color-codes losers: yellow (≤10% worse) and red (>10% worse). Relative uses wider bands: yellow (>10%) and red (>30%). Winners are green in both. Charts use Unicode block characters for horizontal bar charts.
 
 ### Export
 
@@ -91,7 +91,7 @@ Cross-compilation targets: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64,
 
 | Flag | Description |
 |------|-------------|
-| `--dry-run` | Fake data, no Ollama needed (50ms per run) |
+| `--dry-run` | Fake data, no Ollama needed (50ms per run). TUI mode only |
 | `-n, --runs` | Runs per model per round (default 3) |
 | `--rounds R` | Number of rounds with randomized order |
 | `--balanced` | Latin-square positional balancing with `--rounds` |
@@ -114,7 +114,7 @@ Cross-compilation targets: darwin/amd64, darwin/arm64, linux/amd64, linux/arm64,
 
 - No args → launches TUI; model args → CLI mode
 - `--runs` >= 1, `--rounds` >= 1, `--cooldown` >= 0
-- `--round-robin` and `--rounds` are mutually exclusive
+- `--round-robin` and `--rounds > 1` are mutually exclusive (default `--rounds 1` is allowed with `--round-robin`)
 - `--balanced` requires `--rounds > 1`
 - `--cooldown` requires `--rounds > 1` or `--round-robin`
 - `--export` cannot be combined with `--json`, `--html`, or `--png`
@@ -140,7 +140,6 @@ go test ./...                                    # unit tests
 The TUI benchmark goroutine follows these rules:
 - `BenchmarkOnce()` accepts `context.Context` — cancelled when the user navigates away ('r' on results page)
 - All writes to shared state (`results` map, `done` counter) happen inside `QueueUpdateDraw()`, serializing with UI reads on the main thread
-- `resultsShown` flag prevents the completion handler from clobbering an already-displayed results page
 - Export functions return errors; the UI shows red error text on failure instead of a false success message
 
 ## Install script
