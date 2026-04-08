@@ -68,6 +68,8 @@ ollama-profiler gemma4:e2b qwen3.5:2b \
 - **Export** — JSON with metadata, self-contained HTML report, retina PNG charts
 - **Reproducible** — deterministic seed, configurable token limits, warmup & cooldown
 
+### Chart Export
+
 ![charts](.github/charts.png)
 
 Requires [Ollama](https://ollama.com) running locally, or pass `--url` for a remote server. Run `ollama-profiler --help` for full usage.
