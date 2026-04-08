@@ -355,6 +355,26 @@ func TestOllamaConnectionError_NotInstalled(t *testing.T) {
 	}
 }
 
+func TestOllamaConnectionError_RemoteURL(t *testing.T) {
+	// For a remote URL, even if ollama is not on PATH locally,
+	// we should NOT say "not installed" — it's a remote server.
+	tmp := t.TempDir()
+	t.Setenv("PATH", tmp) // no ollama binary
+
+	got := OllamaConnectionError("http://gpu-box:11434", newOpError())
+	msg := got.Error()
+
+	if strings.Contains(msg, "not installed") {
+		t.Errorf("remote URL should not say 'not installed', got: %s", msg)
+	}
+	if !strings.Contains(msg, "could not connect") {
+		t.Errorf("expected 'could not connect' message, got: %s", msg)
+	}
+	if !strings.Contains(msg, "gpu-box:11434") {
+		t.Errorf("expected base URL in message, got: %s", msg)
+	}
+}
+
 func TestOllamaConnectionError_NotRunning(t *testing.T) {
 	// Create a fake "ollama" binary on PATH so LookPath succeeds.
 	tmp := t.TempDir()
@@ -378,6 +398,31 @@ func TestOllamaConnectionError_NotRunning(t *testing.T) {
 	}
 	if strings.Contains(msg, "not installed") {
 		t.Errorf("should not say 'not installed' when binary exists, got: %s", msg)
+	}
+}
+
+func TestIsLocalURL(t *testing.T) {
+	tests := []struct {
+		url  string
+		want bool
+	}{
+		{"http://localhost:11434", true},
+		{"http://127.0.0.1:11434", true},
+		{"http://[::1]:11434", true},
+		{"http://localhost", true},
+		{"https://localhost:443", true},
+		{"http://gpu-box:11434", false},
+		{"http://192.168.1.100:11434", false},
+		{"http://example.com:11434", false},
+		{"http://10.0.0.1:11434", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			got := isLocalURL(tt.url)
+			if got != tt.want {
+				t.Errorf("isLocalURL(%q) = %v, want %v", tt.url, got, tt.want)
+			}
+		})
 	}
 }
 

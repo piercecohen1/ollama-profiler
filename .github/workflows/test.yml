@@ -45,8 +45,8 @@ jobs:
             echo "FAIL: binary panicked"
             exit 1
           fi
-          if ! echo "$output" | grep -q "could not connect to Ollama"; then
-            echo "FAIL: expected 'could not connect to Ollama' in output"
+          if ! echo "$output" | grep -qE "(could not connect to Ollama|Ollama is not installed)"; then
+            echo "FAIL: expected connection or install error in output"
             exit 1
           fi
           echo "PASS: graceful connection error (no panic)"

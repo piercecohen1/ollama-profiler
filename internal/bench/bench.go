@@ -372,26 +372,54 @@ type BenchmarkOpts struct {
 }
 
 // OllamaConnectionError wraps connection failures with a user-friendly message.
-// It distinguishes between Ollama not being installed vs not running.
+// For local servers, it distinguishes between Ollama not being installed vs not running.
 func OllamaConnectionError(baseURL string, err error) error {
 	var opErr *net.OpError
 	if !errors.As(err, &opErr) {
 		return err
 	}
 
-	// Check if the ollama binary is on PATH.
-	if _, lookErr := exec.LookPath("ollama"); lookErr != nil {
-		var installCmd string
-		switch runtime.GOOS {
-		case "windows":
-			installCmd = "irm https://ollama.com/install.ps1 | iex"
-		default: // macOS, Linux
-			installCmd = "curl -fsSL https://ollama.com/install.sh | sh"
+	// Only check local install status when targeting localhost.
+	if isLocalURL(baseURL) {
+		if _, lookErr := exec.LookPath("ollama"); lookErr != nil {
+			var installCmd string
+			switch runtime.GOOS {
+			case "windows":
+				installCmd = "irm https://ollama.com/install.ps1 | iex"
+			default: // macOS, Linux
+				installCmd = "curl -fsSL https://ollama.com/install.sh | sh"
+			}
+			return fmt.Errorf("Ollama is not installed.\n\n  Install it with:\n\n    %s\n\n  Then start the server with: ollama serve", installCmd)
 		}
-		return fmt.Errorf("Ollama is not installed.\n\n  Install it with:\n\n    %s\n\n  Then start the server with: ollama serve", installCmd)
 	}
 
 	return fmt.Errorf("could not connect to Ollama at %s\n\n  Is Ollama running? Start it with: ollama serve\n\n  To use a different server: --url <host:port> or set OLLAMA_HOST", baseURL)
+}
+
+// isLocalURL returns true if the URL targets localhost or a loopback address.
+func isLocalURL(baseURL string) bool {
+	host := baseURL
+	// Strip scheme.
+	if i := strings.Index(host, "://"); i >= 0 {
+		host = host[i+3:]
+	}
+	// Strip path.
+	if i := strings.Index(host, "/"); i >= 0 {
+		host = host[:i]
+	}
+	// Strip port.
+	if i := strings.LastIndex(host, ":"); i >= 0 {
+		host = host[:i]
+	}
+	// Strip IPv6 brackets.
+	host = strings.TrimPrefix(host, "[")
+	host = strings.TrimSuffix(host, "]")
+
+	switch host {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
 }
 
 // BenchmarkOnce runs a single inference pass against a model and returns metrics.
