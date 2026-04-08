@@ -4,6 +4,9 @@
 __pycache__/
 *.pyc
 
+# Go cache
+.gocache/
+
 # Go build artifacts
 /ollama-profiler
 dist/

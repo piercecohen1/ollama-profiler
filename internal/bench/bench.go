@@ -366,7 +366,7 @@ type ollamaChunk struct {
 
 // BenchmarkOpts controls per-request Ollama parameters for reproducible benchmarking.
 type BenchmarkOpts struct {
-	NumPredict int    // >0: limit generated tokens, 0: Ollama default (unlimited)
+	NumPredict int    // >0: limit generated tokens, 0: unlimited (-1 to Ollama)
 	Seed       int    // >0: fixed seed for determinism, 0: random
 	Think      string // "": disabled, "true": enabled, "low"/"medium"/"high": thinking level
 }
@@ -439,6 +439,8 @@ func BenchmarkOnce(ctx context.Context, model, prompt, baseURL string, opts Benc
 	options := map[string]interface{}{}
 	if opts.NumPredict > 0 {
 		options["num_predict"] = opts.NumPredict
+	} else if opts.NumPredict == 0 {
+		options["num_predict"] = -1 // Ollama uses -1 for unlimited
 	}
 	if opts.Seed > 0 {
 		options["seed"] = opts.Seed
@@ -464,6 +466,12 @@ func BenchmarkOnce(ctx context.Context, model, prompt, baseURL string, opts Benc
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err == nil && errResp.Error != "" {
+			return nil, fmt.Errorf("Ollama error (status %d): %s", resp.StatusCode, errResp.Error)
+		}
 		return nil, fmt.Errorf("Ollama returned status %d", resp.StatusCode)
 	}
 
@@ -544,6 +552,12 @@ func FetchModels(baseURL string) ([]OllamaModel, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err == nil && errResp.Error != "" {
+			return nil, fmt.Errorf("Ollama error (status %d): %s", resp.StatusCode, errResp.Error)
+		}
 		return nil, fmt.Errorf("Ollama returned status %d for /api/tags", resp.StatusCode)
 	}
 
