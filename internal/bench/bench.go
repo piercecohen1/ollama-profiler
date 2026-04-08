@@ -13,6 +13,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -370,12 +372,26 @@ type BenchmarkOpts struct {
 }
 
 // OllamaConnectionError wraps connection failures with a user-friendly message.
+// It distinguishes between Ollama not being installed vs not running.
 func OllamaConnectionError(baseURL string, err error) error {
 	var opErr *net.OpError
-	if errors.As(err, &opErr) {
-		return fmt.Errorf("could not connect to Ollama at %s\n\n  Is Ollama running? Start it with: ollama serve\n  Install from: https://ollama.com\n\n  To use a different server: --url <host:port> or set OLLAMA_HOST", baseURL)
+	if !errors.As(err, &opErr) {
+		return err
 	}
-	return err
+
+	// Check if the ollama binary is on PATH.
+	if _, lookErr := exec.LookPath("ollama"); lookErr != nil {
+		var installCmd string
+		switch runtime.GOOS {
+		case "windows":
+			installCmd = "irm https://ollama.com/install.ps1 | iex"
+		default: // macOS, Linux
+			installCmd = "curl -fsSL https://ollama.com/install.sh | sh"
+		}
+		return fmt.Errorf("Ollama is not installed.\n\n  Install it with:\n\n    %s\n\n  Then start the server with: ollama serve", installCmd)
+	}
+
+	return fmt.Errorf("could not connect to Ollama at %s\n\n  Is Ollama running? Start it with: ollama serve\n\n  To use a different server: --url <host:port> or set OLLAMA_HOST", baseURL)
 }
 
 // BenchmarkOnce runs a single inference pass against a model and returns metrics.

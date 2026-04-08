@@ -2,6 +2,11 @@ package bench
 
 import (
 	"math"
+	"net"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -311,6 +316,68 @@ func TestMetricKeys(t *testing.T) {
 		if !found {
 			t.Errorf("metric %q not found in AllMetrics", key)
 		}
+	}
+}
+
+// ── OllamaConnectionError tests ────────────────────────────────────────────
+
+func newOpError() *net.OpError {
+	return &net.OpError{Op: "dial", Net: "tcp", Err: &os.SyscallError{Syscall: "connect", Err: os.ErrNotExist}}
+}
+
+func TestOllamaConnectionError_NonOpError(t *testing.T) {
+	orig := os.ErrClosed
+	got := OllamaConnectionError("http://localhost:11434", orig)
+	if got != orig {
+		t.Errorf("expected original error returned unchanged, got %v", got)
+	}
+}
+
+func TestOllamaConnectionError_NotInstalled(t *testing.T) {
+	// Point PATH to an empty dir so LookPath("ollama") fails.
+	tmp := t.TempDir()
+	t.Setenv("PATH", tmp)
+
+	got := OllamaConnectionError("http://localhost:11434", newOpError())
+	msg := got.Error()
+
+	if !strings.Contains(msg, "not installed") {
+		t.Errorf("expected 'not installed' message, got: %s", msg)
+	}
+	if runtime.GOOS == "windows" {
+		if !strings.Contains(msg, "install.ps1") {
+			t.Errorf("expected PowerShell install command on Windows, got: %s", msg)
+		}
+	} else {
+		if !strings.Contains(msg, "install.sh") {
+			t.Errorf("expected curl install command, got: %s", msg)
+		}
+	}
+}
+
+func TestOllamaConnectionError_NotRunning(t *testing.T) {
+	// Create a fake "ollama" binary on PATH so LookPath succeeds.
+	tmp := t.TempDir()
+	fakeBin := filepath.Join(tmp, "ollama")
+	if runtime.GOOS == "windows" {
+		fakeBin += ".exe"
+	}
+	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", tmp)
+
+	got := OllamaConnectionError("http://gpu-box:11434", newOpError())
+	msg := got.Error()
+
+	if !strings.Contains(msg, "could not connect") {
+		t.Errorf("expected 'could not connect' message, got: %s", msg)
+	}
+	if !strings.Contains(msg, "gpu-box:11434") {
+		t.Errorf("expected base URL in message, got: %s", msg)
+	}
+	if strings.Contains(msg, "not installed") {
+		t.Errorf("should not say 'not installed' when binary exists, got: %s", msg)
 	}
 }
 
