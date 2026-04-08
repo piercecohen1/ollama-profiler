@@ -60,6 +60,19 @@ jobs:
           else
             tar -C "$outdir" -czf "dist/${binary}-${suffix}.tar.gz" "${binary}${ext}"
           fi
+      - name: Verify packaged archive contents
+        run: |
+          set -euo pipefail
+          binary=ollama-profiler
+          suffix="${{ matrix.goos }}-${{ matrix.goarch }}"
+
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            archive="dist/${binary}-${suffix}.zip"
+            unzip -Z1 "$archive" | grep -Fx "${binary}.exe"
+          else
+            archive="dist/${binary}-${suffix}.tar.gz"
+            tar -tzf "$archive" | grep -Fx "${binary}"
+          fi
       - name: Check version flag
         if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
         run: |
@@ -113,6 +126,22 @@ jobs:
             --url https://github.com/piercecohen1/ollama-profiler \
             --set-version-var main.version \
             --version "$version"
+      - name: Verify wheel install and CLI entrypoint
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          if [ "${#wheels[@]}" -eq 0 ]; then
+            echo "FAIL: no wheels found in dist/"
+            exit 1
+          fi
+          echo "Found ${#wheels[@]} wheel(s)"
+
+          uv venv .venv
+          . .venv/bin/activate
+          uv pip install --no-index --find-links dist ollama-profiler
+          ollama-profiler --version | grep -F "$version"
       - name: Store the distribution packages
         uses: actions/upload-artifact@v4
         with:

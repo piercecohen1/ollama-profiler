@@ -34,13 +34,19 @@ jobs:
       - name: Smoke test (invalid model, expect graceful error)
         shell: bash
         run: |
-          # Should fail with a connection error (no Ollama running), not a crash/panic
+          # Should print a connection error and not crash/panic.
+          # The CLI exits 0 even when all runs fail (errors are per-run, not fatal).
+          # Point at a closed localhost port to make the failure deterministic.
           set +e
-          output=$(./ollama-profiler${{ matrix.os == 'windows-latest' && '.exe' || '' }} nonexistent-model -n 1 2>&1)
-          exit_code=$?
+          output=$(./ollama-profiler${{ matrix.os == 'windows-latest' && '.exe' || '' }} --url http://127.0.0.1:1 nonexistent-model -n 1 2>&1)
+          set -e
           echo "$output"
           if echo "$output" | grep -qi "panic"; then
             echo "FAIL: binary panicked"
             exit 1
           fi
-          echo "PASS: exited with code $exit_code (no panic)"
+          if ! echo "$output" | grep -q "could not connect to Ollama"; then
+            echo "FAIL: expected 'could not connect to Ollama' in output"
+            exit 1
+          fi
+          echo "PASS: graceful connection error (no panic)"
