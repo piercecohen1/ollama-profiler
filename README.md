@@ -48,11 +48,11 @@ Compiled binaries are available [on the releases page](https://github.com/pierce
 ollama pull gemma4:e2b
 ollama pull qwen3.5:2b
 
-# Launch the interactive TUI
-ollama-profiler
-
-# Or compare directly from the command line
+# Compare them
 ollama-profiler gemma4:e2b qwen3.5:2b
+
+# Interactive TUI with mouse support
+ollama-profiler --tui
 
 # Rigorous comparison with balanced scheduling
 ollama-profiler gemma4:e2b qwen3.5:2b \
@@ -62,7 +62,7 @@ ollama-profiler gemma4:e2b qwen3.5:2b \
 ## Features
 
 - **Side-by-side comparison** of multiple models on the same prompt
-- **TUI + CLI** — interactive TUI by default, or pass models for non-interactive CLI output
+- **TUI + CLI** — agent-friendly CLI by default, or launch an interactive full-screen TUI with `--tui`
 - **Fair scheduling** — sequential, round-robin, randomized rounds, or Latin-square balanced
 - **Statistical summary** — mean, stddev, min/max, relative %, color-coded winners
 - **Export** — JSON with metadata, self-contained HTML report, retina PNG charts

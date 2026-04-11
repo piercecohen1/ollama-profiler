@@ -136,7 +136,31 @@ func TestRootCmd_BareThinkFlagUsesTrue(t *testing.T) {
 	}
 }
 
-func TestRootCmd_NoArgsRunsTUI(t *testing.T) {
+func TestRootCmd_NoArgsErrors(t *testing.T) {
+	origRunCLI := runCLI
+	origRunTUI := runTUI
+	t.Cleanup(func() {
+		runCLI = origRunCLI
+		runTUI = origRunTUI
+	})
+
+	runCLI = func(cli.Config) error {
+		return errors.New("unexpected CLI invocation")
+	}
+	runTUI = func(bool, string) error {
+		return errors.New("unexpected TUI invocation")
+	}
+
+	err := executeRoot(t)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "at least one model is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRootCmd_TUIFlagLaunchesTUI(t *testing.T) {
 	origRunCLI := runCLI
 	origRunTUI := runTUI
 	t.Cleanup(func() {
@@ -151,8 +175,8 @@ func TestRootCmd_NoArgsRunsTUI(t *testing.T) {
 	called := false
 	runTUI = func(dry bool, base string) error {
 		called = true
-		if dry {
-			t.Fatalf("dry = true, want false")
+		if !dry {
+			t.Fatalf("dry = false, want true")
 		}
 		if base != "http://localhost:11434" {
 			t.Fatalf("base = %q, want %q", base, "http://localhost:11434")
@@ -160,10 +184,20 @@ func TestRootCmd_NoArgsRunsTUI(t *testing.T) {
 		return nil
 	}
 
-	if err := executeRoot(t); err != nil {
+	if err := executeRoot(t, "--tui", "--dry-run"); err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 	if !called {
 		t.Fatal("expected TUI runner to be called")
+	}
+}
+
+func TestRootCmd_TUIRejectsExportFlags(t *testing.T) {
+	err := executeRoot(t, "--tui", "--json", "out.json")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "only valid in CLI mode") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

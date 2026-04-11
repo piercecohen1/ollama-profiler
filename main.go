@@ -31,6 +31,7 @@ var (
 	pngFile    string
 	exportDir  string
 	noPerRun   bool
+	useTUI     bool
 	dryRun     bool
 	numPredict int
 	seed       int
@@ -57,19 +58,19 @@ func newRootCmd() *cobra.Command {
 		Short:   "Benchmark and compare Ollama models side-by-side",
 		Long: `ollama-profiler — Compare Ollama model performance side-by-side.
 
-Launches the interactive TUI by default. Pass model names as arguments
-for non-interactive CLI mode.
+Runs in non-interactive CLI mode by default. Pass --tui to launch the
+interactive full-screen interface instead.
 
-Scheduling modes (CLI):
+Scheduling modes:
   (default)       Sequential — all runs of model A, then B, then C.
   --round-robin   Interleave — cycle through models each run.
   --rounds R      Multiple rounds with randomized model order per round.
   --balanced      With --rounds, use Latin-square positional balancing.`,
-		Example: `  ollama-profiler                                               # interactive TUI
-  ollama-profiler --dry-run                                     # TUI with fake data
-  ollama-profiler gemma4:e4b gemma4:26b gemma4:31b -n 4         # CLI mode
+		Example: `  ollama-profiler gemma4:e4b gemma4:26b gemma4:31b -n 4
   ollama-profiler gemma4:e4b gemma4:26b -n 3 --rounds 4 --cooldown 30
-  ollama-profiler gemma4:e4b gemma4:26b -n 3 --rounds 3 --balanced --warmup`,
+  ollama-profiler gemma4:e4b gemma4:26b -n 3 --rounds 3 --balanced --warmup
+  ollama-profiler --tui                                         # interactive TUI
+  ollama-profiler --tui --dry-run                               # TUI with fake data`,
 		Args: cobra.ArbitraryArgs,
 		RunE: runRoot,
 	}
@@ -93,7 +94,8 @@ Scheduling modes (CLI):
 	f.IntVar(&seed, "seed", 42, "Random seed for deterministic output (0 = random)")
 	f.StringVar(&think, "think", "", `Thinking mode: "true", "low", "medium", "high" (default: disabled)`)
 	f.Lookup("think").NoOptDefVal = "true"
-	f.BoolVar(&dryRun, "dry-run", false, "Use fake data (TUI launches with simulated benchmarks)")
+	f.BoolVar(&useTUI, "tui", false, "Launch interactive TUI")
+	f.BoolVar(&dryRun, "dry-run", false, "Use fake data (TUI only; no Ollama required)")
 
 	return rootCmd
 }
@@ -113,6 +115,7 @@ func resetFlagDefaults() {
 	pngFile = ""
 	exportDir = ""
 	noPerRun = false
+	useTUI = false
 	dryRun = false
 	numPredict = 256
 	seed = 42
@@ -122,15 +125,19 @@ func resetFlagDefaults() {
 func runRoot(cmd *cobra.Command, args []string) error {
 	resolvedURL := bench.ResolveBaseURL(baseURL)
 
-	if len(args) == 0 {
+	if useTUI {
 		if jsonFile != "" || htmlFile != "" || pngFile != "" || exportDir != "" {
-			return fmt.Errorf("--json, --html, --png, and --export are only valid in CLI mode (pass model names as arguments)")
+			return fmt.Errorf("--json, --html, --png, and --export are only valid in CLI mode")
 		}
 		return runTUI(dryRun, resolvedURL)
 	}
 
+	if len(args) == 0 {
+		return fmt.Errorf("at least one model is required (or use --tui for interactive mode)")
+	}
+
 	if dryRun {
-		return fmt.Errorf("--dry-run is only valid in TUI mode (without model names)")
+		return fmt.Errorf("--dry-run is only valid in TUI mode (use --tui)")
 	}
 	if runs < 1 {
 		return fmt.Errorf("--runs must be at least 1")
